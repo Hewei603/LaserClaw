@@ -1,0 +1,181 @@
+/**
+ * 应用样式
+ */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 导航栏 */
+.navbar {
+  background-color: #1a1825;
+  border-bottom: 1px solid #2a2838;
+  padding: 1rem 0;
+}
+
+.nav-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.nav-brand {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #6c8eef;
+}
+
+.nav-links {
+  display: flex;
+  gap: 2rem;
+}
+
+.nav-links a {
+  color: #e0e0e0;
+  transition: color 0.2s;
+}
+
+.nav-links a:hover {
+  color: #6c8eef;
+  text-decoration: none;
+}
+
+/* 主内容区 */
+.main-content {
+  flex: 1;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+/* 页脚 */
+.footer {
+  background-color: #1a1825;
+  border-top: 1px solid #2a2838;
+  padding: 1.5rem 0;
+  text-align: center;
+  color: #888;
+}
+
+/* 通用按钮样式 */
+.btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background-color: #6c8eef;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #5a7dd9;
+}
+
+.btn-secondary {
+  background-color: #2a2838;
+  color: #e0e0e0;
+}
+
+.btn-secondary:hover {
+  background-color: #3a3848;
+}
+
+.btn-danger {
+  background-color: #ef6c6c;
+  color: white;
+}
+
+.btn-danger:hover {
+  background-color: #d95a5a;
+}
+
+/* 卡片样式 */
+.card {
+  background-color: #1a1825;
+  border: 1px solid #2a2838;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.card-title {
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: #e0e0e0;
+}
+
+.card-content {
+  color: #b0b0b0;
+}
+
+/* 表单样式 */
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #e0e0e0;
+  font-weight: 500;
+}
+
+.form-input,
+.form-textarea,
+.form-select {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: #1a1825;
+  border: 1px solid #2a2838;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 1rem;
+}
+
+.form-input:focus,
+.form-textarea:focus,
+.form-select:focus {
+  outline: none;
+  border-color: #6c8eef;
+}
+
+.form-textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+/* 加载状态 */
+.loading {
+  text-align: center;
+  padding: 2rem;
+  color: #888;
+}
+
+/* 错误信息 */
+.error {
+  background-color: #3a2020;
+  border: 1px solid #ef6c6c;
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  color: #ef6c6c;
+}
+
+/* 免责声明 */
+.disclaimer {
+  background-color: #3a3020;
+  border: 1px solid #efb06c;
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  color: #efb06c;
+}
