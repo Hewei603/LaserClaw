@@ -28,6 +28,8 @@ LaserClaw is a local-first **Tool-calling RAG Agent** workspace for laser experi
 - **Traceability**: persists Agent tasks, steps, tool calls, retrieved citations, generated contents, and audit logs.
 - **Bilingual UI**: English / Chinese frontend language switch.
 
+<img width="2533" height="1339" alt="aaf64e0dd186049c62032c55c618898b" src="https://github.com/user-attachments/assets/ffc09e0d-93a4-4259-a07b-c943fbbf4cf9" />
+
 ## Agent Workflow
 
 ```mermaid
@@ -70,6 +72,8 @@ Current synthetic evaluation documents:
 - `lab_safety_manual.txt`: indexed as a TXT global source
 
 These are **synthetic evaluation documents**. They are not real laboratory policies, operating procedures, equipment procurement data, or safety training material.
+
+<img width="2555" height="1332" alt="image" src="https://github.com/user-attachments/assets/5f01420a-a81c-4e97-a48c-0d7a22e72dd8" />
 
 ## Latest Local Benchmark
 
