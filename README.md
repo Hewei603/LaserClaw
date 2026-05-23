@@ -2,7 +2,8 @@
 
 LaserClaw is a local-first **Tool-calling RAG Agent** workspace for laser experiment workflows. It combines experiment case management, global lab knowledge indexing, retrieval-augmented chat, structured artifact generation, citations, and persistent Agent traces.
 
-![Uploading image.png…]()
+<img width="2534" height="1343" alt="image" src="https://github.com/user-attachments/assets/b8ebb7f4-f980-4671-8722-2ef0913f7f70" />
+
 
 > Safety note: LaserClaw does not control lasers, power supplies, translation stages, interlocks, optical tables, detectors, or any other lab hardware. Generated content is advisory draft material and must be reviewed by qualified personnel.
 
