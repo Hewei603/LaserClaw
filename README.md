@@ -1,336 +1,301 @@
 # LaserClaw
 
-**LaserClaw** 是一个垂直AI代理应用，用于激光实验辅助。它是一个AI辅助工作流系统，提供实验计划、ReZonator模式/模板草稿、基于症状的故障排查、实验案例记录和报告生成等功能。
+LaserClaw is a local-first **Tool-calling RAG Agent** workspace for laser experiment workflows. It combines experiment case management, global lab knowledge indexing, retrieval-augmented chat, structured artifact generation, citations, and persistent Agent traces.
 
-> ⚠️ **重要提示**: LaserClaw 是实验工作流辅助系统，不是直接硬件控制系统。所有AI生成的内容都是启发式建议，需要人工验证。
+> Safety note: LaserClaw does not control lasers, power supplies, translation stages, interlocks, optical tables, detectors, or any other lab hardware. Generated content is advisory draft material and must be reviewed by qualified personnel.
 
-## 功能特性
+## What It Solves
 
-- 🔬 **实验案例管理**: 创建、查看、编辑和删除激光实验案例
-- 📋 **实验计划生成**: 基于实验目标和腔型自动生成结构化的实验步骤
-- 🎯 **ReZonator模式草稿**: 根据腔型和参数生成ReZonator模式/模板草稿
-- 🔧 **故障排查**: 基于观察到的症状提供可能的原因分析和解决方案
-- 📊 **报告生成**: 自动生成结构化的实验报告
-- 📎 **附件管理**: 上传和查看实验相关的图片、笔记、数据文件和ReZonator模式文件
-- 🎭 **演示模式**: 内置模拟AI提供者，无需外部API密钥即可演示所有功能
+| Problem | LaserClaw Approach |
+|---|---|
+| Experiment context is scattered across notes, files, and prior runs | Case-aware RAG retrieval with source citations |
+| Troubleshooting is hard to reproduce | Tool-calling Agent creates structured diagnostic artifacts |
+| Plans, reports, and simulation drafts are repetitive | Saved structured artifacts for plan, troubleshooting, report, and ReZonator draft |
+| AI outputs are difficult to audit | Persistent task, step, tool-call, citation, and artifact records |
 
-## 技术栈
+## Core Features
 
-### 后端
-- **FastAPI**: 现代、快速的Python Web框架
-- **SQLAlchemy**: Python SQL工具包和ORM
-- **PostgreSQL**: 强大的开源关系型数据库
-- **Pydantic**: 数据验证和设置管理
+- **Case-aware Agent chat**: chat with the selected experiment case, recent conversation history, case data, and global lab knowledge.
+- **RAG knowledge base**: indexes cases, text attachments, generated artifacts, and global lab documents.
+- **Global lab documents**: upload shared PDFs, TXT, Markdown, CSV, JSON, or log files for all cases.
+- **Optimized local retrieval**: Chinese character n-grams, phrase expansion, section-aware chunking, section metadata, and lightweight domain reranking for safety vs optics queries.
+- **Tool routing**: routes user requests to chat, experiment plan, troubleshooting, report, or ReZonator draft.
+- **Structured artifacts**: validates generated plan, troubleshooting, report, and resonator JSON against schemas.
+- **Multi-provider support**: MockProvider, OpenAI-compatible Chat Completions, and Anthropic.
+- **Traceability**: persists Agent tasks, steps, tool calls, retrieved citations, generated contents, and audit logs.
+- **Bilingual UI**: English / Chinese frontend language switch.
 
-### 前端
-- **React 18**: 用户界面库
-- **Vite**: 下一代前端构建工具
-- **React Router**: 声明式路由
-- **Axios**: HTTP客户端
+## Agent Workflow
 
-### 部署
-- **Docker Compose**: 容器编排
-- **本地文件存储**: 附件存储
-
-## 架构
-
-```
-LaserClaw/
-├── backend/              # FastAPI后端
-│   ├── app/
-│   │   ├── main.py      # 应用入口
-│   │   ├── config.py    # 配置管理
-│   │   ├── database.py  # 数据库连接
-│   │   ├── models/      # SQLAlchemy模型
-│   │   ├── schemas/     # Pydantic模式
-│   │   ├── api/         # API路由
-│   │   ├── services/    # 业务逻辑（未来扩展）
-│   │   └── providers/   # AI提供者抽象
-│   ├── tests/           # pytest测试
-│   ├── seed_data.py     # 数据库种子数据
-│   └── requirements.txt
-├── frontend/            # React前端
-│   ├── src/
-│   │   ├── pages/       # 页面组件
-│   │   ├── components/  # 可复用组件（未来扩展）
-│   │   └── api/         # API客户端
-│   └── package.json
-├── docker-compose.yml   # Docker编排配置
-├── docs/                # 文档
-└── README.md
+```mermaid
+flowchart LR
+    A[User input] --> B[Route intent]
+    B --> C[Retrieve context]
+    C --> D[Call provider/tool]
+    D --> E[Validate schema]
+    E --> F[Persist artifact]
+    F --> G[Trace and citations]
 ```
 
-## 快速开始
+## Tool Routing
 
-### 前置要求
+The app supports five intent classes:
 
-- Docker 和 Docker Compose
-- Git
+| User intent | Tool / mode |
+|---|---|
+| General chat or QA | `chat` |
+| Generate an experiment plan | `generate_plan` |
+| Generate troubleshooting guidance | `generate_troubleshooting` |
+| Generate an experiment report | `generate_report` |
+| Generate a ReZonator / resonator simulation draft | `generate_resonator_draft` |
 
-### 安装步骤
+The chat API can auto-route generation requests, and direct task creation is also available through `POST /api/agent/tasks`.
 
-1. **克隆仓库**
+## RAG and Knowledge Sources
 
-```bash
-git clone <repository-url>
-cd LaserClaw
+The current RAG stack is deterministic and local. It does not require a vector database:
+
+- tokenization: ASCII terms + Chinese character, bigram, and trigram tokens
+- synonym expansion for common safety and optics terms
+- section-aware chunking for headings such as `[SAF-PPE]`, `[SAF-SOP]`, `[OPT-MIRROR]`
+- section metadata persisted on chunks
+- lightweight domain boost for safety-related vs optics-related queries
+
+Current synthetic evaluation documents:
+
+- `synthetic_optical_components_catalog.pdf`: indexed as a PDF global source
+- `lab_safety_manual.txt`: indexed as a TXT global source
+
+These are **synthetic evaluation documents**. They are not real laboratory policies, operating procedures, equipment procurement data, or safety training material.
+
+## Latest Local Benchmark
+
+The old MockProvider / demo knowledge benchmark is deprecated. The current benchmark was run with OpenAIProvider configuration and synthetic evaluation documents.
+
+| Item | Value |
+|---|---|
+| Provider | OpenAIProvider |
+| Model configured | `gpt-5` |
+| Base URL configured | `https://openrouter.ai/api/v1` |
+| RAG retrieval queries | 50 |
+| RAG answer-generation sample | 30 in the prior full eval |
+| Tool routing instructions | 80 |
+| Structured artifact generations | 20 |
+| End-to-end Agent tasks | 10 |
+| Backend tests | 120 passed |
+
+| Metric | Result |
+|---|---:|
+| RAG Top-1 hit rate | 95.45% |
+| RAG Top-3 hit rate | 97.73% |
+| RAG MRR | 0.9678 |
+| Citation correctness | 82.00% |
+| Tool routing accuracy | 80.00% |
+| Schema pass rate | 100.00% |
+| End-to-end task success rate | 100.00% |
+| Trace completeness | 100.00% |
+
+RAG optimization improved Top-3 retrieval from 52.27% to 97.73% on the same 50-query synthetic benchmark. A 10-sample RAG answer retest was attempted after the retrieval optimization, but OpenRouter returned `403: This model is not available in your region` for the configured `gpt-5`, so answer-generation retest results are not used as model-quality evidence.
+
+Known benchmark limitations:
+
+- The safety manual is currently indexed as TXT, not as a PDF source.
+- Evaluation is based on synthetic documents, not real laboratory data.
+- Negative query rejection dropped from 100.00% to 83.33% after stronger recall; score thresholds and abstention logic are still needed.
+- Token usage and cost are not exposed by the current provider wrapper.
+- The local lexical retriever is not a replacement for production embeddings or reranking.
+
+## Quick Start on Windows
+
+```bat
+Launch-LaserClaw.bat
 ```
 
-2. **启动服务**
+The launcher:
 
-```bash
-docker-compose up -d
-```
+- creates `backend/.venv` if needed
+- installs backend dependencies
+- installs frontend dependencies
+- starts FastAPI at `127.0.0.1:8000`
+- starts Vite at `127.0.0.1:5173`
 
-这将启动三个服务:
-- PostgreSQL 数据库 (端口 5432)
-- FastAPI 后端 (端口 8000)
-- React 前端 (端口 5173)
+Open:
 
-3. **填充演示数据**
+- Frontend: <http://127.0.0.1:5173>
+- Agent workspace: <http://127.0.0.1:5173/agent>
+- API docs: <http://127.0.0.1:8000/docs>
 
-```bash
-docker-compose exec backend python seed_data.py
-```
+## Manual Local Startup
 
-4. **访问应用**
+Backend:
 
-打开浏览器访问: http://localhost:5173
-
-API文档: http://localhost:8000/docs
-
-### 停止服务
-
-```bash
-docker-compose down
-```
-
-### 查看日志
-
-```bash
-# 查看所有服务日志
-docker-compose logs -f
-
-# 查看特定服务日志
-docker-compose logs -f backend
-docker-compose logs -f frontend
-```
-
-## 演示流程
-
-### 1. 查看演示案例
-
-启动应用后，点击"实验案例"查看预填充的5个演示案例:
-
-- Ti:Sapphire环形腔激光器对准
-- Nd:YAG线性腔热效应问题排查
-- OPO蝴蝶形腔参数优化
-- 光纤激光器系统调试
-- 锁模激光器稳定性测试
-
-### 2. 创建新案例
-
-1. 点击"新建案例"
-2. 填写实验信息:
-   - 标题
-   - 描述
-   - 腔型 (线性腔/环形腔/蝴蝶形腔/自定义)
-   - 实验目标
-   - 关键参数 (键值对)
-   - 观察到的症状 (多选)
-3. 点击"保存"
-
-### 3. 生成AI辅助内容
-
-在案例详情页面，切换到不同标签页并点击生成按钮:
-
-- **实验计划**: 生成结构化的实验步骤
-- **ReZonator模式**: 生成ReZonator模式/模板草稿
-- **故障排查**: 基于症状生成排查建议
-- **实验报告**: 生成实验报告模板
-
-### 4. 上传附件
-
-在"附件"标签页:
-1. 选择文件上传
-2. 查看已上传的附件
-3. 下载或删除附件
-
-## API端点
-
-### 实验案例
-
-- `POST /api/cases` - 创建案例
-- `GET /api/cases` - 获取案例列表
-- `GET /api/cases/{id}` - 获取案例详情
-- `PUT /api/cases/{id}` - 更新案例
-- `DELETE /api/cases/{id}` - 删除案例
-
-### 内容生成
-
-- `POST /api/cases/{id}/generate-plan` - 生成实验计划
-- `POST /api/cases/{id}/generate-rezonator` - 生成ReZonator模式
-- `POST /api/cases/{id}/generate-troubleshooting` - 生成故障排查
-- `POST /api/cases/{id}/generate-report` - 生成实验报告
-- `GET /api/cases/{id}/generated-contents` - 获取生成内容列表
-
-### 附件
-
-- `POST /api/cases/{id}/attachments` - 上传附件
-- `GET /api/cases/{id}/attachments` - 获取附件列表
-- `GET /api/attachments/{id}` - 下载附件
-- `DELETE /api/attachments/{id}` - 删除附件
-
-完整API文档: http://localhost:8000/docs
-
-## 开发
-
-### 后端开发
-
-```bash
+```powershell
 cd backend
-
-# 创建虚拟环境
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 运行测试
-pytest
-
-# 运行开发服务器
-uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-### 前端开发
+Frontend:
 
-```bash
+```powershell
 cd frontend
-
-# 安装依赖
 npm install
-
-# 运行开发服务器
-npm run dev
-
-# 构建生产版本
-npm run build
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-### 运行测试
+## Docker Compose
 
 ```bash
-# 后端测试
-docker-compose exec backend pytest
+docker compose up -d --build
+```
 
-# 或在本地
+Services:
+
+- frontend: `localhost:5173`
+- backend API: `localhost:8000`
+- API docs: `localhost:8000/docs`
+
+Stop:
+
+```bash
+docker compose down
+```
+
+## Environment Variables
+
+Create a local `.env` file for provider and runtime settings. Do not commit `.env` or API keys.
+
+```env
+AI_PROVIDER=mock
+
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5
+OPENAI_BASE_URL=https://api.openai.com/v1
+
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL=claude-sonnet-4-5
+ANTHROPIC_MAX_TOKENS=2048
+ANTHROPIC_TEMPERATURE=0.2
+
+STRICT_PROVIDER=false
+REQUIRE_AUTH=false
+API_KEY=
+
+DATABASE_URL=sqlite:///./laserclaw.db
+UPLOAD_DIR=./uploads
+MAX_UPLOAD_SIZE=10485760
+AUTO_CREATE_TABLES=true
+
+VITE_API_URL=http://127.0.0.1:8000
+```
+
+Provider modes:
+
+- `mock`: deterministic local demo mode
+- `openai`: OpenAI-compatible Chat Completions provider
+- `anthropic`: Anthropic provider
+
+If `STRICT_PROVIDER=false`, the app can fall back to MockProvider when a real provider is unavailable. Use `STRICT_PROVIDER=true` for strict evaluation.
+
+## Tests
+
+```powershell
 cd backend
-pytest -v
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-## 配置
+Current local result:
 
-### 环境变量
-
-后端环境变量 (backend/.env):
-
-```env
-DATABASE_URL=postgresql://laserclaw:laserclaw123@db:5432/laserclaw
-UPLOAD_DIR=/app/uploads
-MAX_UPLOAD_SIZE=10485760  # 10MB
-AI_PROVIDER=mock  # mock, openai, anthropic (未来支持)
+```text
+120 passed
 ```
 
-前端环境变量 (frontend/.env):
+Useful targeted tests:
 
-```env
-VITE_API_URL=http://localhost:8000
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_router.py -q
+.\.venv\Scripts\python.exe -m pytest tests\test_schemas.py -q
+.\.venv\Scripts\python.exe -m pytest tests\test_knowledge_agent.py -q
 ```
 
-## 数据库模式
+## API Surface
 
-### ExperimentCase (实验案例)
+Core endpoints:
 
-- `id`: 主键
-- `title`: 标题
-- `description`: 描述
-- `cavity_type`: 腔型 (linear/ring/bow-tie/custom)
-- `goal`: 实验目标
-- `parameters`: 关键参数 (JSON)
-- `symptoms`: 症状列表 (JSON)
-- `created_at`: 创建时间
-- `updated_at`: 更新时间
+- `POST /api/cases`
+- `GET /api/cases`
+- `GET /api/cases/{case_id}`
+- `POST /api/cases/{case_id}/generate-plan`
+- `POST /api/cases/{case_id}/generate-troubleshooting`
+- `POST /api/cases/{case_id}/generate-report`
+- `POST /api/cases/{case_id}/generate-rezonator`
+- `GET /api/cases/{case_id}/generated-contents`
+- `POST /api/knowledge/sources/upload`
+- `GET /api/knowledge/sources`
+- `POST /api/knowledge/search`
+- `POST /api/agent/chat`
+- `POST /api/agent/tasks`
+- `GET /api/agent/tasks/{task_id}`
+- `GET /api/agent/tasks/{task_id}/tool-calls`
 
-### GeneratedContent (生成内容)
+## Persistence
 
-- `id`: 主键
-- `case_id`: 关联案例ID
-- `content_type`: 内容类型 (plan/rezonator/troubleshooting/report)
-- `content`: 内容 (JSON)
-- `generated_at`: 生成时间
+Important tables:
 
-### Attachment (附件)
+- `experiment_cases`
+- `attachments`
+- `knowledge_sources`
+- `knowledge_chunks`
+- `retrieval_runs`
+- `retrieval_results`
+- `agent_chat_sessions`
+- `agent_chat_messages`
+- `agent_tasks`
+- `agent_steps`
+- `agent_tool_calls`
+- `generated_contents`
+- `audit_logs`
 
-- `id`: 主键
-- `case_id`: 关联案例ID
-- `filename`: 文件名
-- `filepath`: 文件路径
-- `file_type`: 文件类型
-- `uploaded_at`: 上传时间
+## Project Structure
 
-## 路线图
+```text
+LaserClaw/
+├── backend/
+│   ├── app/
+│   │   ├── agent/        # routing, context, planner, orchestrator, tools
+│   │   ├── api/          # FastAPI routes
+│   │   ├── auth/         # optional API-key auth
+│   │   ├── knowledge/    # ingestion, chunking, local embeddings, retrieval
+│   │   ├── models/       # SQLAlchemy models
+│   │   ├── observability/
+│   │   ├── providers/    # Mock, OpenAI, Anthropic
+│   │   └── schemas/
+│   ├── alembic/
+│   ├── data/knowledge/   # synthetic/demo knowledge files
+│   ├── tests/
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── api/
+│   │   ├── pages/
+│   │   ├── LanguageContext.jsx
+│   │   └── i18n.js
+│   └── package.json
+├── Launch-LaserClaw.bat
+├── docker-compose.yml
+├── README.md
+└── READMEcn.md
+```
 
-### MVP (当前版本)
+## Roadmap
 
-- ✅ 实验案例CRUD
-- ✅ 结构化实验输入
-- ✅ 实验计划生成
-- ✅ ReZonator模式草稿生成
-- ✅ 基于症状的故障排查
-- ✅ 报告生成
-- ✅ 附件管理
-- ✅ 演示数据
-- ✅ 模拟AI提供者
+- Add calibrated no-answer thresholds for RAG.
+- Add production embedding provider support and vector database storage.
+- Persist provider usage, tokens, and cost estimates.
+- Add stronger reranking for section-level citation correctness.
+- Add optional LangSmith or OpenTelemetry tracing.
+- Expand benchmarks with real, permissioned lab documents and human-labeled queries.
 
-### 未来增强
+## License
 
-- [ ] 真实AI提供者集成 (OpenAI, Anthropic)
-- [ ] 高级多代理编排
-- [ ] 用户认证和授权
-- [ ] 协作功能
-- [ ] 高级可视化
-- [ ] 导出为多种格式
-- [ ] 仪器驱动集成 (仅监控，非控制)
-- [ ] 云部署支持
-- [ ] 移动端适配
-
-## 贡献
-
-欢迎贡献! 请遵循以下步骤:
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-## 许可证
-
-本项目采用 MIT 许可证 - 详见 LICENSE 文件
-
-## 致谢
-
-- ReZonator 社区
-- 激光物理实验室的所有成员
-- 所有贡献者
-
-## 联系方式
-
-- 项目主页: [GitHub Repository]
-- 问题反馈: [GitHub Issues]
-
----
-
-**[Fufan Lab]** - 让激光实验更简单
+MIT License. See [LICENSE](LICENSE).

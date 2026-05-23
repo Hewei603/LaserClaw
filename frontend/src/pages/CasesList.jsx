@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { casesApi } from '../api/cases';
+import { useLanguage } from '../LanguageContext';
 
 function CasesList() {
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const { t } = useLanguage();
 
-  useEffect(() => {
-    loadCases();
-  }, []);
+  useEffect(() => { loadCases(); }, []);
 
   const loadCases = async () => {
     try {
@@ -18,55 +18,36 @@ function CasesList() {
       setCases(data);
       setError(null);
     } catch (err) {
-      setError('加载案例失败: ' + err.message);
+      setError(t('casesList.loadFailed') + ': ' + err.message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('确定要删除这个案例吗？')) {
-      return;
-    }
-
+    if (!window.confirm(t('casesList.confirmDelete'))) return;
     try {
       await casesApi.delete(id);
       loadCases();
     } catch (err) {
-      alert('删除失败: ' + err.message);
+      alert(t('casesList.deleteFailed') + ': ' + err.message);
     }
   };
 
-  const getCavityTypeLabel = (type) => {
-    const labels = {
-      linear: '线性腔',
-      ring: '环形腔',
-      'bow-tie': '蝴蝶形腔',
-      custom: '自定义'
-    };
-    return labels[type] || type;
-  };
+  const getCavityTypeLabel = (type) => t(`cavityTypes.${type}`) || type;
 
-  if (loading) {
-    return <div className="loading">加载中...</div>;
-  }
-
-  if (error) {
-    return <div className="error">{error}</div>;
-  }
+  if (loading) return <div className="loading">{t('common.loading')}</div>;
+  if (error) return <div className="error">{error}</div>;
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h1>实验案例</h1>
-        <Link to="/cases/new" className="btn btn-primary">
-          新建案例
-        </Link>
+        <h1>{t('casesList.title')}</h1>
+        <Link to="/cases/new" className="btn btn-primary">{t('casesList.newCase')}</Link>
       </div>
-
       {cases.length === 0 ? (
         <div className="card">
-          <p>还没有案例。<Link to="/cases/new">创建第一个案例</Link></p>
+          <p>{t('casesList.noCases')} <Link to="/cases/new">{t('casesList.createFirst')}</Link></p>
         </div>
       ) : (
         <div style={{ display: 'grid', gap: '1rem' }}>
@@ -78,26 +59,19 @@ function CasesList() {
                     <Link to={`/cases/${caseItem.id}`}>{caseItem.title}</Link>
                   </h2>
                   <p className="card-content" style={{ marginTop: '0.5rem' }}>
-                    {caseItem.description || '无描述'}
+                    {caseItem.description || t('common.noDescription')}
                   </p>
                   <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', fontSize: '0.9rem', color: '#888' }}>
-                    <span>腔型: {getCavityTypeLabel(caseItem.cavity_type)}</span>
-                    <span>创建时间: {new Date(caseItem.created_at).toLocaleDateString()}</span>
-                    {caseItem.symptoms && caseItem.symptoms.length > 0 && (
-                      <span>症状: {caseItem.symptoms.length}个</span>
+                    <span>{t('casesList.cavity')}: {getCavityTypeLabel(caseItem.cavity_type)}</span>
+                    <span>{t('casesList.created')}: {new Date(caseItem.created_at).toLocaleDateString()}</span>
+                    {caseItem.symptoms?.length > 0 && (
+                      <span>{t('casesList.symptoms')}: {caseItem.symptoms.length}{t('casesList.symptomsCount')}</span>
                     )}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem' }}>
-                  <Link to={`/cases/${caseItem.id}/edit`} className="btn btn-secondary">
-                    编辑
-                  </Link>
-                  <button
-                    onClick={() => handleDelete(caseItem.id)}
-                    className="btn btn-danger"
-                  >
-                    删除
-                  </button>
+                  <Link to={`/cases/${caseItem.id}/edit`} className="btn btn-secondary">{t('common.edit')}</Link>
+                  <button onClick={() => handleDelete(caseItem.id)} className="btn btn-danger">{t('common.delete')}</button>
                 </div>
               </div>
             </div>

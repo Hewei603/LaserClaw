@@ -86,4 +86,9 @@ export const casesApi = {
   deleteAttachment: async (attachmentId) => {
     await apiClient.delete(`/api/attachments/${attachmentId}`);
   },
+
+  analyzeAttachment: async (attachmentId) => {
+    const response = await apiClient.post(`/api/attachments/${attachmentId}/analyze`);
+    return response.data;
+  },
 };
