@@ -1,177 +1,148 @@
-"""
-内容生成API路由
-"""
+"""Content generation API routes."""
+from __future__ import annotations
+
+import logging
+from time import perf_counter
+from typing import Any, Awaitable
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from ..database import get_db
-from ..models import ExperimentCase, GeneratedContent
-from ..schemas import GeneratedContentResponse, GenerateRequest
-from ..providers import get_ai_provider
 
+from ..database import get_db
+from ..knowledge.ingestion import create_generated_content_source
+from ..knowledge.retrieval import results_to_citations, search_case_and_global_knowledge
+from ..models import ExperimentCase, GeneratedContent
+from ..observability.audit import record_audit
+from ..providers import get_ai_provider
+from ..schemas import GeneratedContentResponse, GenerateRequest
+
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/{case_id}/generate-plan", response_model=GeneratedContentResponse)
-async def generate_plan(
-    case_id: int,
-    request: GenerateRequest = GenerateRequest(),
-    db: Session = Depends(get_db)
-):
-    """生成实验计划"""
-    # 获取案例
+def _get_case_or_404(case_id: int, db: Session) -> ExperimentCase:
     case = db.query(ExperimentCase).filter(ExperimentCase.id == case_id).first()
     if not case:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"案例 {case_id} 不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Case {case_id} does not exist")
+    return case
 
-    # 准备案例数据
-    case_data = {
+
+def _full_case_data(case: ExperimentCase) -> dict[str, Any]:
+    return {
         "title": case.title,
         "description": case.description,
         "cavity_type": case.cavity_type,
         "goal": case.goal,
         "parameters": case.parameters,
-        "symptoms": case.symptoms
+        "symptoms": case.symptoms,
     }
 
-    # 生成计划
-    provider = get_ai_provider()
-    content = await provider.generate_plan(case_data)
 
-    # 保存生成的内容
+def _query_for(case: ExperimentCase, content_type: str) -> str:
+    symptoms = " ".join(case.symptoms or [])
+    parameters = " ".join(f"{key} {value}" for key, value in (case.parameters or {}).items())
+    return f"{content_type} {case.title} {case.cavity_type} {case.goal} {symptoms} {parameters}"
+
+
+async def _run_generation(content_type: str, work: Awaitable[dict[str, Any]]) -> tuple[dict[str, Any], int]:
+    started = perf_counter()
+    try:
+        return await work, int((perf_counter() - started) * 1000)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to generate %s content", content_type)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to generate {content_type}: {exc}",
+        ) from exc
+
+
+def _augment_with_rag(case: ExperimentCase, content_type: str, content: dict[str, Any], request: GenerateRequest, db: Session) -> None:
+    if not request.use_rag:
+        return
+    _, results = search_case_and_global_knowledge(
+        db,
+        query=_query_for(case, content_type),
+        case_id=case.id,
+        top_k=request.top_k,
+    )
+    content["citations"] = results_to_citations(results)
+    content["confidence"] = "medium" if results else "low"
+    if not results:
+        content["missing_information"] = ["No matching knowledge source was found; review attachments and case history."]
+
+
+def _save_generated_content(
+    case_id: int,
+    content_type: str,
+    content: dict[str, Any],
+    db: Session,
+    *,
+    latency_ms: int | None = None,
+) -> GeneratedContent:
     generated = GeneratedContent(
         case_id=case_id,
-        content_type="plan",
-        content=content
+        content_type=content_type,
+        content=content,
+        prompt_version=f"{content_type}_rag_v1",
+        latency_ms=latency_ms,
     )
     db.add(generated)
+    db.flush()
+    create_generated_content_source(db, generated)
+    record_audit(db, action="generation.create", resource_type="generated_content", resource_id=str(generated.id))
     db.commit()
     db.refresh(generated)
-
     return generated
+
+
+@router.post("/{case_id}/generate-plan", response_model=GeneratedContentResponse)
+async def generate_plan(case_id: int, request: GenerateRequest = GenerateRequest(), db: Session = Depends(get_db)):
+    """Generate an experiment plan with retrieval citations."""
+    case = _get_case_or_404(case_id, db)
+    provider = get_ai_provider()
+    content, latency_ms = await _run_generation("plan", provider.generate_plan(_full_case_data(case)))
+    _augment_with_rag(case, "plan", content, request, db)
+    return _save_generated_content(case_id, "plan", content, db, latency_ms=latency_ms)
 
 
 @router.post("/{case_id}/generate-rezonator", response_model=GeneratedContentResponse)
-async def generate_rezonator(
-    case_id: int,
-    request: GenerateRequest = GenerateRequest(),
-    db: Session = Depends(get_db)
-):
-    """生成ReZonator模式草稿"""
-    case = db.query(ExperimentCase).filter(ExperimentCase.id == case_id).first()
-    if not case:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"案例 {case_id} 不存在"
-        )
-
-    case_data = {
-        "title": case.title,
-        "cavity_type": case.cavity_type,
-        "parameters": case.parameters
-    }
-
+async def generate_rezonator(case_id: int, request: GenerateRequest = GenerateRequest(), db: Session = Depends(get_db)):
+    """Generate a ReZonator schema draft."""
+    case = _get_case_or_404(case_id, db)
+    case_data = {"title": case.title, "cavity_type": case.cavity_type, "parameters": case.parameters}
     provider = get_ai_provider()
-    content = await provider.generate_rezonator_schema(case_data)
-
-    generated = GeneratedContent(
-        case_id=case_id,
-        content_type="rezonator",
-        content=content
-    )
-    db.add(generated)
-    db.commit()
-    db.refresh(generated)
-
-    return generated
+    content, latency_ms = await _run_generation("rezonator", provider.generate_rezonator_schema(case_data))
+    _augment_with_rag(case, "rezonator", content, request, db)
+    return _save_generated_content(case_id, "rezonator", content, db, latency_ms=latency_ms)
 
 
 @router.post("/{case_id}/generate-troubleshooting", response_model=GeneratedContentResponse)
-async def generate_troubleshooting(
-    case_id: int,
-    request: GenerateRequest = GenerateRequest(),
-    db: Session = Depends(get_db)
-):
-    """生成故障排查建议"""
-    case = db.query(ExperimentCase).filter(ExperimentCase.id == case_id).first()
-    if not case:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"案例 {case_id} 不存在"
-        )
-
-    case_data = {
-        "title": case.title,
-        "cavity_type": case.cavity_type,
-        "parameters": case.parameters
-    }
-
+async def generate_troubleshooting(case_id: int, request: GenerateRequest = GenerateRequest(), db: Session = Depends(get_db)):
+    """Generate troubleshooting advice with retrieved context citations."""
+    case = _get_case_or_404(case_id, db)
+    case_data = {"title": case.title, "cavity_type": case.cavity_type, "parameters": case.parameters}
     provider = get_ai_provider()
-    content = await provider.generate_troubleshooting(case.symptoms, case_data)
-
-    generated = GeneratedContent(
-        case_id=case_id,
-        content_type="troubleshooting",
-        content=content
-    )
-    db.add(generated)
-    db.commit()
-    db.refresh(generated)
-
-    return generated
+    content, latency_ms = await _run_generation("troubleshooting", provider.generate_troubleshooting(case.symptoms, case_data))
+    _augment_with_rag(case, "troubleshooting", content, request, db)
+    return _save_generated_content(case_id, "troubleshooting", content, db, latency_ms=latency_ms)
 
 
 @router.post("/{case_id}/generate-report", response_model=GeneratedContentResponse)
-async def generate_report(
-    case_id: int,
-    request: GenerateRequest = GenerateRequest(),
-    db: Session = Depends(get_db)
-):
-    """生成实验报告"""
-    case = db.query(ExperimentCase).filter(ExperimentCase.id == case_id).first()
-    if not case:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"案例 {case_id} 不存在"
-        )
-
-    case_data = {
-        "title": case.title,
-        "description": case.description,
-        "cavity_type": case.cavity_type,
-        "goal": case.goal,
-        "parameters": case.parameters,
-        "symptoms": case.symptoms
-    }
-
+async def generate_report(case_id: int, request: GenerateRequest = GenerateRequest(), db: Session = Depends(get_db)):
+    """Generate an experiment report."""
+    case = _get_case_or_404(case_id, db)
     provider = get_ai_provider()
-    content = await provider.generate_report(case_data)
-
-    generated = GeneratedContent(
-        case_id=case_id,
-        content_type="report",
-        content=content
-    )
-    db.add(generated)
-    db.commit()
-    db.refresh(generated)
-
-    return generated
+    content, latency_ms = await _run_generation("report", provider.generate_report(_full_case_data(case)))
+    _augment_with_rag(case, "report", content, request, db)
+    return _save_generated_content(case_id, "report", content, db, latency_ms=latency_ms)
 
 
 @router.get("/{case_id}/generated-contents", response_model=list[GeneratedContentResponse])
-async def list_generated_contents(
-    case_id: int,
-    content_type: str = None,
-    db: Session = Depends(get_db)
-):
-    """获取案例的生成内容列表"""
+async def list_generated_contents(case_id: int, content_type: str = None, db: Session = Depends(get_db)):
+    """List generated content for a case."""
     query = db.query(GeneratedContent).filter(GeneratedContent.case_id == case_id)
-
     if content_type:
         query = query.filter(GeneratedContent.content_type == content_type)
-
-    contents = query.order_by(GeneratedContent.generated_at.desc()).all()
-    return contents
+    return query.order_by(GeneratedContent.generated_at.desc()).all()
