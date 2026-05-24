@@ -1,109 +1,85 @@
 # LaserClaw 中文说明
 
-LaserClaw 是一个面向激光实验工作流的本地优先 **Tool-calling RAG Agent** 工作台。它把实验 case 管理、全局知识库索引、RAG 检索增强问答、结构化 artifact 生成、citation 引用溯源和 Agent trace 执行链路追踪整合到一个应用里。
+LaserClaw 是一个面向激光实验工作流的本地优先 **RAG Agent 工作台**。它把实验 Case 管理、全局实验室知识库、Case 专属文档检索、结构化 AI 生成、Agent 执行轨迹和课题组协作治理整合在一个应用里。
 
 > 安全说明：LaserClaw 不控制激光器、电源、位移台、联锁、光学平台、探测器或任何实验室硬件。所有 AI 生成内容都只是辅助草稿，必须由具备资质的人员复核后才能用于真实实验。
 
-## 解决的问题
+## 解决什么问题
 
-| 问题 | LaserClaw 的处理方式 |
+| 问题 | LaserClaw 的做法 |
 |---|---|
-| 实验上下文分散在笔记、附件和历史运行记录中 | 基于 case 的 RAG 检索，并返回 source citation |
-| 故障排查过程难以复现 | Tool-calling Agent 生成结构化诊断 artifact |
-| 计划、报告、仿真草案重复劳动多 | 生成并保存 plan、troubleshooting、report、ReZonator draft |
-| AI 输出难以审计 | 持久化 task、step、tool-call、citation 和 artifact 记录 |
+| 实验知识分散在手册、SOP、笔记和附件里 | 用两层 RAG 同时检索全局实验室文档和 Case 文档 |
+| AI 回答难以审计 | 保存 retrieval run、citation、generated artifact、Agent step 和 tool call |
+| 排障、计划、报告和仿真草稿重复劳动多 | 自动生成结构化 plan、troubleshooting、report、ReZonator draft |
+| 课题组需要长期协作 | 支持项目、用户、组、权限、知识库治理、prompt/workflow 版本和 Case bundle |
 
 ## 核心能力
 
-- **Case-aware Agent chat**：围绕当前实验 case、最近对话、case 数据和全局知识库进行问答。
-- **RAG 知识库**：索引实验 case、文本附件、生成内容和全局实验文档。
-- **全局知识源**：支持上传 PDF、TXT、Markdown、CSV、JSON、log 等共享文档，供所有 case 检索。
-- **本地检索优化**：中文字符 n-gram、短语扩展、按 section 切块、section metadata，以及安全/光学主题的轻量 reranking。
-- **Tool / Function Calling 路由**：自动区分普通问答、实验计划、故障排查、实验报告和 ReZonator 草案。
-- **结构化输出**：对 plan、troubleshooting、report、resonator draft 的 JSON 结果做 schema 校验。
-- **多模型 Provider**：支持 MockProvider、OpenAI-compatible Chat Completions Provider 和 Anthropic Provider。
-- **可追踪性**：保存 Agent tasks、steps、tool calls、retrieved citations、generated contents 和 audit logs。
-- **双语前端**：支持英文 / 中文 UI 切换。
+- **Case-aware Agent chat**：聊天会带上最近对话历史、绑定 Case、RAG 检索结果、citation 和检索置信度。
+- **两层 RAG**：全局实验室文档作为实验室级规则和公共知识；Case 附件、图片分析和生成内容作为当前实验上下文。
+- **全局知识库**：支持上传 PDF、TXT、Markdown、CSV、JSON、TSV、log 等共享文档，供所有 Case 检索。
+- **Case schema v2**：支持项目归属、状态、可见性、标签、测量数据、安全备注、结论、owner 和 schema version。
+- **知识库治理**：支持 `draft`、`approved`、`deprecated`、`archived` 状态，以及 version、owner、reviewer、review time 和 reindex。
+- **Tool-calling Agent 工作流**：自动区分普通聊天、实验计划、故障排查、实验报告和 ReZonator 草稿。
+- **结构化 AI artifact**：保存 plan、troubleshooting、report、image analysis、resonator 等生成内容。
+- **Prompt/workflow 版本管理**：可以维护 active prompt 和 workflow version，支持可复现 AI 运行。
+- **Case bundle 导出**：导出完整 Case 包，包含 manifest、附件、生成内容和知识源 metadata。
+- **RAG eval 和 benchmark**：提供可复现脚本/API，评测检索准确率、延迟、索引吞吐和 LLM JSON 可靠性。
+- **多 Provider 支持**：MockProvider、OpenAI-compatible Chat Completions、Anthropic。
+- **双语 UI**：支持中英文界面切换。
+
+## 技术架构
+
+```text
+React + Vite 前端
+  -> FastAPI 后端
+      -> Case / attachment / knowledge / generation / agent / collaboration APIs
+      -> SQLAlchemy models
+      -> 本地 SQLite 或 Docker PostgreSQL
+      -> 文件上传和全局知识文档
+      -> RAG 文档解析、切块、embedding、检索、citation
+      -> OpenAI / Anthropic / Mock provider
+      -> 审计日志、token/usage、Agent trace、generated artifact
+```
+
+## RAG 工作流
+
+```text
+全局 PDF / Case 附件 / 生成内容
+  -> 文本抽取
+  -> chunk 切分
+  -> embedding
+  -> KnowledgeSource + KnowledgeChunk
+  -> 查询时检索
+  -> RetrievalRun + RetrievalResult
+  -> 带 citation 的上下文
+  -> chat 或 artifact generation
+```
+
+LaserClaw 的 RAG 有两类检索源：
+
+1. **全局实验室知识**：安全手册、SOP、光学元件目录、实验室规则等。所有 Case 都会检索这类文档，并且它们在安全和规范问题上优先级最高。
+2. **Case 专属知识**：Case 本身、附件、图片分析、历史报告和生成内容。它们用于补充当前实验的局部上下文。
 
 ## Agent 工作流
 
-```mermaid
-flowchart LR
-    A[用户输入] --> B[意图路由]
-    B --> C[检索上下文]
-    C --> D[调用 provider/tool]
-    D --> E[Schema 校验]
-    E --> F[持久化 artifact]
-    F --> G[Trace 与 citations]
+```text
+用户消息
+  -> 创建或找到 chat session
+  -> 保存 user message
+  -> 判断意图
+  -> 构造上下文：
+       当前消息
+       最近聊天历史
+       绑定 Case 数据
+       全局 RAG 结果
+       Case RAG 结果
+       citations 和 retrieval confidence
+  -> 普通聊天回复或创建正式 Agent task
+  -> 保存 assistant message / task / artifact / citations
 ```
 
-## 工具路由
-
-当前支持五类用户意图：
-
-| 用户意图 | Tool / mode |
-|---|---|
-| 普通聊天或问答 | `chat` |
-| 生成实验计划 | `generate_plan` |
-| 生成故障排查建议 | `generate_troubleshooting` |
-| 生成实验报告 | `generate_report` |
-| 生成 ReZonator / resonator 仿真草案 | `generate_resonator_draft` |
-
-聊天接口可以自动路由生成类请求，也可以通过 `POST /api/agent/tasks` 直接创建 Agent task。
-
-## RAG 与知识源
-
-当前 RAG 检索是确定性的本地实现，不依赖向量数据库：
-
-- tokenization：ASCII terms + 中文单字、bigram、trigram
-- 对常见安全和光学术语做 synonym expansion
-- 对 `[SAF-PPE]`、`[SAF-SOP]`、`[OPT-MIRROR]` 等标题做 section-aware chunking
-- 在 chunk metadata 中保存 section 信息
-- 对安全类和光学类 query 做轻量 domain boost
-
-当前 synthetic evaluation documents：
-
-- `synthetic_optical_components_catalog.pdf`：作为 PDF 全局知识源索引
-- `lab_safety_manual.txt`：作为 TXT 全局知识源索引
-
-这些文档是 **synthetic evaluation documents / 合成测试知识库**。它们不是真实实验室制度、操作规程、采购数据或安全培训材料。
-
-## 最新本地评测
-
-旧的 MockProvider / demo knowledge benchmark 已废弃。当前指标来自 OpenAIProvider 配置和 synthetic evaluation documents。
-
-| 项目 | 数值 |
-|---|---|
-| Provider | OpenAIProvider |
-| 配置模型 | `gpt-5` |
-| 配置 Base URL | `https://openrouter.ai/api/v1` |
-| RAG 检索 query 数量 | 50 |
-| RAG 回答生成样本 | 之前完整评测中为 30 |
-| 工具路由指令数量 | 80 |
-| 结构化 artifact 生成次数 | 20 |
-| 端到端 Agent task 数量 | 10 |
-| 后端测试 | 120 passed |
-
-| 指标 | 结果 |
-|---|---:|
-| RAG Top-1 hit rate | 95.45% |
-| RAG Top-3 hit rate | 97.73% |
-| RAG MRR | 0.9678 |
-| Citation correctness | 82.00% |
-| Tool routing accuracy | 80.00% |
-| Schema pass rate | 100.00% |
-| End-to-end task success rate | 100.00% |
-| Trace completeness | 100.00% |
-
-在同一套 50 条 synthetic benchmark 上，RAG 优化后 Top-3 hit rate 从 52.27% 提升到 97.73%。优化后的 10 条 RAG answer retest 曾尝试调用配置模型，但 OpenRouter 对 `gpt-5` 返回 `403: This model is not available in your region`，因此该轮回答生成结果不作为模型质量证据。
-
-已知限制：
-
-- 安全手册当前以 TXT 形式索引，不是 PDF source。
-- 评测基于 synthetic documents，不代表真实实验室数据表现。
-- 强化召回后，negative query rejection 从 100.00% 降到 83.33%，后续需要加入更明确的拒答阈值和 abstention 逻辑。
-- 当前 provider wrapper 没有暴露 token usage 和 cost。
-- 当前本地 lexical retriever 不能替代生产级 embedding 与 reranking。
+普通聊天时，后端会把结构化 context 交给模型回答。生成 artifact 时，系统会创建 `AgentTask`，生成步骤，调用工具，检索证据，生成内容，保存到 Case，并保存完整执行轨迹。
 
 ## Windows 快速启动
 
@@ -111,16 +87,9 @@ flowchart LR
 Launch-LaserClaw.bat
 ```
 
-启动脚本会：
+启动脚本会安装依赖并启动：
 
-- 创建 `backend/.venv`
-- 安装后端依赖
-- 安装前端依赖
-- 启动 FastAPI：`127.0.0.1:8000`
-- 启动 Vite：`127.0.0.1:5173`
-
-访问地址：
-
+- 后端 API：<http://127.0.0.1:8000>
 - 前端：<http://127.0.0.1:5173>
 - Agent 工作台：<http://127.0.0.1:5173/agent>
 - API 文档：<http://127.0.0.1:8000/docs>
@@ -131,8 +100,9 @@ Launch-LaserClaw.bat
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+py -m pip install -r requirements.txt
+py -m alembic upgrade head
+py -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 前端：
@@ -151,9 +121,9 @@ docker compose up -d --build
 
 服务地址：
 
-- 前端：`localhost:5173`
-- 后端 API：`localhost:8000`
-- API 文档：`localhost:8000/docs`
+- 前端：<http://localhost:5173>
+- 后端 API：<http://localhost:8000>
+- API 文档：<http://localhost:8000/docs>
 
 停止：
 
@@ -163,28 +133,30 @@ docker compose down
 
 ## 环境变量
 
-可以创建本地 `.env` 配置 Provider 和运行参数。不要提交 `.env` 或真实 API key。
+创建 `.env` 配置本地 provider 和运行参数。不要提交真实 API key。
 
 ```env
 AI_PROVIDER=mock
+STRICT_PROVIDER=false
 
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5
+OPENAI_MODEL=gpt-4o
 OPENAI_BASE_URL=https://api.openai.com/v1
 
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-sonnet-4-5
-ANTHROPIC_MAX_TOKENS=2048
-ANTHROPIC_TEMPERATURE=0.2
-
-STRICT_PROVIDER=false
-REQUIRE_AUTH=false
-API_KEY=
 
 DATABASE_URL=sqlite:///./laserclaw.db
 UPLOAD_DIR=./uploads
-MAX_UPLOAD_SIZE=10485760
+MAX_UPLOAD_SIZE=52428800
 AUTO_CREATE_TABLES=true
+
+EMBEDDING_PROVIDER=local
+RETRIEVAL_BACKEND=sql_json
+VECTOR_STORE_DIR=./vector_store
+
+REQUIRE_AUTH=false
+API_KEY=
 
 VITE_API_URL=http://127.0.0.1:8000
 ```
@@ -195,52 +167,74 @@ Provider 模式：
 - `openai`：OpenAI-compatible Chat Completions Provider
 - `anthropic`：Anthropic Provider
 
-当 `STRICT_PROVIDER=false` 时，真实 Provider 不可用时系统可以回退到 MockProvider。做严格评测时应使用 `STRICT_PROVIDER=true`。
+严格评测时建议设置 `STRICT_PROVIDER=true`，这样真实 Provider 不可用时会明确失败，而不是回退到 MockProvider。
+
+## Benchmark
+
+运行可复现 benchmark：
+
+```powershell
+py backend\scripts\benchmark_resume_metrics.py --repeats 10 --top-k 5
+```
+
+跳过真实 LLM 调用：
+
+```powershell
+py backend\scripts\benchmark_resume_metrics.py --repeats 10 --top-k 5 --skip-llm
+```
+
+报告会在本地生成，不提交到 Git：
+
+```text
+docs/benchmarks/
+```
 
 ## 测试
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q
+py -m pytest tests -q
 ```
 
 当前本地结果：
 
 ```text
-120 passed
+127 passed
 ```
 
-常用定向测试：
+前端构建：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_router.py -q
-.\.venv\Scripts\python.exe -m pytest tests\test_schemas.py -q
-.\.venv\Scripts\python.exe -m pytest tests\test_knowledge_agent.py -q
+cd frontend
+npm run build
 ```
 
 ## 主要 API
 
-核心接口：
-
 - `POST /api/cases`
 - `GET /api/cases`
 - `GET /api/cases/{case_id}`
+- `GET /api/cases/{case_id}/bundle`
+- `POST /api/cases/{case_id}/attachments`
 - `POST /api/cases/{case_id}/generate-plan`
 - `POST /api/cases/{case_id}/generate-troubleshooting`
 - `POST /api/cases/{case_id}/generate-report`
 - `POST /api/cases/{case_id}/generate-rezonator`
-- `GET /api/cases/{case_id}/generated-contents`
 - `POST /api/knowledge/sources/upload`
 - `GET /api/knowledge/sources`
+- `PATCH /api/knowledge/sources/{source_id}/governance`
 - `POST /api/knowledge/search`
 - `POST /api/agent/chat`
 - `POST /api/agent/tasks`
 - `GET /api/agent/tasks/{task_id}`
-- `GET /api/agent/tasks/{task_id}/tool-calls`
+- `POST /api/collaboration/users`
+- `POST /api/collaboration/groups`
+- `POST /api/collaboration/projects`
+- `POST /api/versioning/prompts`
+- `POST /api/versioning/workflows`
+- `POST /api/evals/rag`
 
-## 持久化数据
-
-关键表：
+## 关键数据表
 
 - `experiment_cases`
 - `attachments`
@@ -254,6 +248,13 @@ cd backend
 - `agent_steps`
 - `agent_tool_calls`
 - `generated_contents`
+- `organizations`
+- `users`
+- `groups`
+- `projects`
+- `prompt_versions`
+- `workflow_versions`
+- `rag_eval_runs`
 - `audit_logs`
 
 ## 项目结构
@@ -262,16 +263,16 @@ cd backend
 LaserClaw/
 |-- backend/
 |   |-- app/
-|   |   |-- agent/        # routing, context, planner, orchestrator, tools
-|   |   |-- api/          # FastAPI routes
-|   |   |-- auth/         # optional API-key auth
-|   |   |-- knowledge/    # ingestion, chunking, local embeddings, retrieval
-|   |   |-- models/       # SQLAlchemy models
-|   |   |-- observability/
-|   |   |-- providers/    # Mock, OpenAI, Anthropic
+|   |   |-- agent/          # context, routing, planner, orchestrator, tools
+|   |   |-- api/            # FastAPI routes
+|   |   |-- auth/           # API-key auth and coarse roles
+|   |   |-- knowledge/      # ingestion, chunking, embeddings, retrieval
+|   |   |-- models/         # SQLAlchemy models
+|   |   |-- observability/  # audit and usage accounting
+|   |   |-- providers/      # Mock, OpenAI, Anthropic
 |   |   `-- schemas/
 |   |-- alembic/
-|   |-- data/knowledge/   # synthetic/demo knowledge files
+|   |-- scripts/
 |   |-- tests/
 |   `-- requirements.txt
 |-- frontend/
@@ -281,28 +282,20 @@ LaserClaw/
 |   |   |-- LanguageContext.jsx
 |   |   `-- i18n.js
 |   `-- package.json
+|-- docs/
 |-- Launch-LaserClaw.bat
 |-- docker-compose.yml
 |-- README.md
 `-- READMEcn.md
 ```
 
-## Roadmap
+## 当前限制
 
-- 增加 calibrated no-answer threshold，改善 RAG 文档外问题拒答。
-- 增加生产级 embedding provider 和 vector database 存储。
-- 持久化 provider usage、token 和 cost 估算。
-- 加强 section-level citation correctness 的 reranking。
-- 增加可选 LangSmith 或 OpenTelemetry tracing。
-- 使用有授权的真实实验室文档和人工标注 query 扩展 benchmark。
-
-## 上传 GitHub 前检查
-
-- 不提交 `.env`。
-- 不提交真实 API key、截图、日志或包含密钥的文档。
-- 不提交本地数据库文件，例如 `*.db`。
-- 不提交 `backend/uploads/` 下的真实上传文件，除非明确是可公开的 synthetic/demo 文件。
-- 推送前至少跑一次后端测试，必要时再跑前端 build。
+- 用户/组/项目模型已经具备，但 endpoint 级细粒度权限还需要继续加强。
+- 大规模检索应接入向量索引后再宣称生产级延迟。
+- 长对话目前使用最近消息窗口，还没有自动长期记忆总结。
+- Benchmark 默认使用 synthetic evaluation documents，除非替换为有授权的真实实验室文档。
+- AI 生成内容只能作为辅助草稿，不能替代真实安全制度、SOP 或人工判断。
 
 ## License
 

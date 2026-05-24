@@ -62,6 +62,10 @@ def search_payload(db: Session, query: str, case_id: int | None, top_k: int, tas
     run, results = search_case_and_global_knowledge(db, query=query, case_id=case_id, top_k=top_k, task_id=task_id)
     return {
         "retrieval_run_id": run.id,
+        "confidence": run.confidence,
+        "no_answer": bool(run.no_answer),
+        "max_score": round(run.max_score or 0.0, 4),
+        "message": (run.filters_json or {}).get("low_confidence_message"),
         "results": [result.model_dump() for result in results],
         "citations": results_to_citations(results),
     }

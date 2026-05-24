@@ -1,12 +1,12 @@
 /**
  * 实验案例API
  */
-import apiClient from './client';
+import apiClient, { API_BASE_URL } from './client';
 
 export const casesApi = {
   // 获取所有案例
-  list: async () => {
-    const response = await apiClient.get('/api/cases');
+  list: async (params = {}) => {
+    const response = await apiClient.get('/api/cases', { params });
     return response.data;
   },
 
@@ -91,4 +91,6 @@ export const casesApi = {
     const response = await apiClient.post(`/api/attachments/${attachmentId}/analyze`);
     return response.data;
   },
+
+  bundleUrl: (id) => `${API_BASE_URL}/api/cases/${id}/bundle`,
 };

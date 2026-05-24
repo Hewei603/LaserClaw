@@ -33,6 +33,10 @@ build/
 backend/uploads/*
 !backend/uploads/.gitkeep
 
+# Local generated data
+backend/data/knowledge/
+docs/benchmarks/
+
 # Docker
 .dockerignore
 

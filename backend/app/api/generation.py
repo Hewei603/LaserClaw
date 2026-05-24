@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..knowledge.ingestion import create_generated_content_source
 from ..knowledge.retrieval import results_to_citations, search_case_and_global_knowledge
-from ..models import ExperimentCase, GeneratedContent
+from ..models import ExperimentCase, GeneratedContent, PromptVersion
 from ..observability.audit import record_audit
+from ..observability.usage import apply_usage_to_generated
 from ..providers import get_ai_provider
 from ..schemas import GeneratedContentResponse, GenerateRequest
 
@@ -61,16 +62,25 @@ async def _run_generation(content_type: str, work: Awaitable[dict[str, Any]]) ->
 def _augment_with_rag(case: ExperimentCase, content_type: str, content: dict[str, Any], request: GenerateRequest, db: Session) -> None:
     if not request.use_rag:
         return
-    _, results = search_case_and_global_knowledge(
+    run, results = search_case_and_global_knowledge(
         db,
         query=_query_for(case, content_type),
         case_id=case.id,
         top_k=request.top_k,
     )
     content["citations"] = results_to_citations(results)
-    content["confidence"] = "medium" if results else "low"
-    if not results:
-        content["missing_information"] = ["No matching knowledge source was found; review attachments and case history."]
+    content["confidence"] = run.confidence or ("medium" if results else "low")
+    content["retrieval"] = {
+        "run_id": run.id,
+        "max_score": round(run.max_score or 0.0, 4),
+        "no_answer": bool(run.no_answer),
+        "message": (run.filters_json or {}).get("low_confidence_message"),
+    }
+    if run.no_answer:
+        content["missing_information"] = [
+            (run.filters_json or {}).get("low_confidence_message")
+            or "No matching knowledge source was found; review attachments and case history."
+        ]
 
 
 def _save_generated_content(
@@ -81,13 +91,20 @@ def _save_generated_content(
     *,
     latency_ms: int | None = None,
 ) -> GeneratedContent:
+    prompt = (
+        db.query(PromptVersion)
+        .filter(PromptVersion.name == content_type, PromptVersion.is_active == True)  # noqa: E712
+        .order_by(PromptVersion.created_at.desc())
+        .first()
+    )
     generated = GeneratedContent(
         case_id=case_id,
         content_type=content_type,
         content=content,
-        prompt_version=f"{content_type}_rag_v1",
+        prompt_version=f"{prompt.name}:{prompt.version}" if prompt else f"{content_type}_rag_v1",
         latency_ms=latency_ms,
     )
+    apply_usage_to_generated(generated, content)
     db.add(generated)
     db.flush()
     create_generated_content_source(db, generated)

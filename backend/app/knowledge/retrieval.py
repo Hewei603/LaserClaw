@@ -3,9 +3,13 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
+from sqlalchemy import or_
+
 from ..models import KnowledgeChunk, KnowledgeSource, RetrievalResult, RetrievalRun
 from ..schemas import Citation, KnowledgeSearchResult
-from .embeddings import cosine_similarity, embed_text, tokenize
+from .embeddings import cosine_similarity, embed_text, lexical_similarity, tokenize
+from .vector_store import chunks_by_ids, query_chunk_ids
 
 
 SAFETY_TERMS = {
@@ -53,6 +57,97 @@ def _domain_boost(query: str, source: KnowledgeSource, chunk: KnowledgeChunk) ->
     return max(boost, 0.2)
 
 
+def _combined_score(query: str, query_embedding: dict, chunk: KnowledgeChunk) -> float:
+    settings = get_settings()
+    vector_score = cosine_similarity(query_embedding, chunk.embedding or {})
+    lexical_score = lexical_similarity(query, f"{chunk.source.title} {chunk.text}")
+    weighted = (settings.retrieval_vector_weight * vector_score) + (settings.retrieval_lexical_weight * lexical_score)
+    return weighted * _domain_boost(query, chunk.source, chunk)
+
+
+def _sql_score_chunks(query: str, query_embedding: dict, chunk_query) -> list[tuple[float, KnowledgeChunk]]:
+    scored: list[tuple[float, KnowledgeChunk]] = []
+    for chunk in chunk_query.all():
+        score = _combined_score(query, query_embedding, chunk)
+        if score > 0:
+            scored.append((score, chunk))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return scored
+
+
+def _vector_store_score_chunks(
+    db: Session,
+    *,
+    query: str,
+    query_embedding: dict,
+    top_k: int,
+    case_id: int | None = None,
+    source_type: str | None = None,
+) -> list[tuple[float, KnowledgeChunk]]:
+    scored_ids = query_chunk_ids(
+        query_embedding=query_embedding,
+        top_k=max(top_k * 4, top_k),
+        case_id=case_id,
+        source_type=source_type,
+    )
+    scored = []
+    for vector_score, chunk in chunks_by_ids(db, scored_ids):
+        lexical_score = lexical_similarity(query, f"{chunk.source.title} {chunk.text}")
+        settings = get_settings()
+        score = (
+            settings.retrieval_vector_weight * vector_score
+            + settings.retrieval_lexical_weight * lexical_score
+        ) * _domain_boost(query, chunk.source, chunk)
+        if score > 0:
+            scored.append((score, chunk))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return scored[:top_k]
+
+
+def _confidence(max_score: float, result_count: int) -> tuple[str, bool, str | None]:
+    settings = get_settings()
+    if result_count < settings.retrieval_min_results or max_score < settings.retrieval_min_score:
+        return (
+            "low",
+            True,
+            "The knowledge base does not contain enough evidence for this question. Review the source documents manually.",
+        )
+    if max_score < settings.retrieval_low_confidence_score:
+        return (
+            "low",
+            True,
+            "Retrieved evidence is weak. Treat the answer as uncertain and inspect the cited documents.",
+        )
+    if max_score < 0.28:
+        return "medium", False, None
+    return "high", False, None
+
+
+def _new_retrieval_run(
+    db: Session,
+    *,
+    task_id: int | None,
+    query: str,
+    filters: dict[str, object],
+    top_k: int,
+    selected: list[tuple[float, KnowledgeChunk]],
+) -> RetrievalRun:
+    max_score = selected[0][0] if selected else 0.0
+    confidence, no_answer, message = _confidence(max_score, len(selected))
+    run = RetrievalRun(
+        task_id=task_id,
+        query=query,
+        filters_json={**filters, "low_confidence_message": message},
+        top_k=top_k,
+        max_score=max_score,
+        confidence=confidence,
+        no_answer=no_answer,
+    )
+    db.add(run)
+    db.flush()
+    return run
+
+
 def search_knowledge(
     db: Session,
     *,
@@ -64,7 +159,8 @@ def search_knowledge(
 ) -> tuple[RetrievalRun, list[KnowledgeSearchResult]]:
     """Search knowledge chunks and persist a retrieval audit record."""
     query_embedding = embed_text(query)
-    chunk_query = db.query(KnowledgeChunk).join(KnowledgeSource)
+    active_source_filter = or_(KnowledgeSource.governance_status.is_(None), KnowledgeSource.governance_status != "archived")
+    chunk_query = db.query(KnowledgeChunk).join(KnowledgeSource).filter(active_source_filter)
     filters: dict[str, object] = {}
     if case_id is not None:
         chunk_query = chunk_query.filter(KnowledgeSource.case_id == case_id)
@@ -73,17 +169,19 @@ def search_knowledge(
         chunk_query = chunk_query.filter(KnowledgeSource.source_type == source_type)
         filters["source_type"] = source_type
 
-    scored: list[tuple[float, KnowledgeChunk]] = []
-    for chunk in chunk_query.all():
-        score = cosine_similarity(query_embedding, chunk.embedding or {}) * _domain_boost(query, chunk.source, chunk)
-        if score > 0:
-            scored.append((score, chunk))
-    scored.sort(key=lambda item: item[0], reverse=True)
+    scored = _vector_store_score_chunks(
+        db,
+        query=query,
+        query_embedding=query_embedding,
+        top_k=top_k,
+        case_id=case_id,
+        source_type=source_type,
+    )
+    if not scored:
+        scored = _sql_score_chunks(query, query_embedding, chunk_query)
     selected = scored[:top_k]
 
-    run = RetrievalRun(task_id=task_id, query=query, filters_json=filters, top_k=top_k)
-    db.add(run)
-    db.flush()
+    run = _new_retrieval_run(db, task_id=task_id, query=query, filters=filters, top_k=top_k, selected=selected)
 
     results: list[KnowledgeSearchResult] = []
     for rank, (score, chunk) in enumerate(selected, start=1):
@@ -137,23 +235,42 @@ def search_case_and_global_knowledge(
     query_embedding = embed_text(query)
 
     def _score_chunks(chunk_query) -> list[tuple[float, KnowledgeChunk]]:
-        scored: list[tuple[float, KnowledgeChunk]] = []
-        for chunk in chunk_query.all():
-            score = cosine_similarity(query_embedding, chunk.embedding or {}) * _domain_boost(query, chunk.source, chunk)
-            if score > 0:
-                scored.append((score, chunk))
-        scored.sort(key=lambda item: item[0], reverse=True)
-        return scored
+        return _sql_score_chunks(query, query_embedding, chunk_query)
 
     # --- Tier 1: global lab documents (always retrieved) ---
-    global_query = db.query(KnowledgeChunk).join(KnowledgeSource).filter(KnowledgeSource.case_id.is_(None))
-    global_scored = _score_chunks(global_query)[:global_slots]
+    active_source_filter = or_(KnowledgeSource.governance_status.is_(None), KnowledgeSource.governance_status != "archived")
+    global_query = (
+        db.query(KnowledgeChunk)
+        .join(KnowledgeSource)
+        .filter(KnowledgeSource.case_id.is_(None), active_source_filter)
+    )
+    global_scored = _vector_store_score_chunks(
+        db,
+        query=query,
+        query_embedding=query_embedding,
+        top_k=global_slots,
+        case_id=0,
+    )
+    if not global_scored:
+        global_scored = _score_chunks(global_query)[:global_slots]
 
     # --- Tier 2: case-specific attachments (only when a case is linked) ---
     case_scored: list[tuple[float, KnowledgeChunk]] = []
     if case_id is not None:
-        case_query = db.query(KnowledgeChunk).join(KnowledgeSource).filter(KnowledgeSource.case_id == case_id)
-        case_scored = _score_chunks(case_query)[:case_slots]
+        case_query = (
+            db.query(KnowledgeChunk)
+            .join(KnowledgeSource)
+            .filter(KnowledgeSource.case_id == case_id, active_source_filter)
+        )
+        case_scored = _vector_store_score_chunks(
+            db,
+            query=query,
+            query_embedding=query_embedding,
+            top_k=case_slots,
+            case_id=case_id,
+        )
+        if not case_scored:
+            case_scored = _score_chunks(case_query)[:case_slots]
 
     filters = {
         "scope": "case_and_global" if case_id is not None else "global",
@@ -163,9 +280,9 @@ def search_case_and_global_knowledge(
     if case_id is not None:
         filters["case_id"] = case_id
 
-    run = RetrievalRun(task_id=task_id, query=query, filters_json=filters, top_k=top_k)
-    db.add(run)
-    db.flush()
+    selected = global_scored + case_scored
+    selected.sort(key=lambda item: item[0], reverse=True)
+    run = _new_retrieval_run(db, task_id=task_id, query=query, filters=filters, top_k=top_k, selected=selected[:top_k])
 
     results: list[KnowledgeSearchResult] = []
     rank = 1

@@ -1,20 +1,28 @@
 """Knowledge API routes."""
 import os
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from ..auth.security import Principal, get_current_principal
 from ..config import get_settings
 from ..database import get_db
-from ..knowledge.ingestion import create_global_file_source, upsert_case_source
+from ..knowledge.ingestion import (
+    extract_text_from_file,
+    object_to_text,
+    replace_source_chunks,
+    upsert_case_source,
+    create_global_file_source,
+)
 from ..knowledge.retrieval import search_knowledge
 from ..models import ExperimentCase, KnowledgeSource
-from ..schemas import KnowledgeSearchRequest, KnowledgeSearchResponse, KnowledgeSourceResponse
+from ..schemas import KnowledgeGovernanceUpdate, KnowledgeSearchRequest, KnowledgeSearchResponse, KnowledgeSourceResponse
 
 router = APIRouter()
 settings = get_settings()
-GLOBAL_KNOWLEDGE_EXTENSIONS = {".pdf", ".txt", ".md", ".csv", ".json", ".log"}
+GLOBAL_KNOWLEDGE_EXTENSIONS = {".pdf", ".txt", ".md", ".csv", ".tsv", ".json", ".log"}
 
 
 @router.get("/sources", response_model=list[KnowledgeSourceResponse])
@@ -27,7 +35,11 @@ async def list_sources(case_id: int | None = None, db: Session = Depends(get_db)
 
 
 @router.post("/sources/upload", response_model=KnowledgeSourceResponse, status_code=status.HTTP_201_CREATED)
-async def upload_global_source(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_global_source(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Upload a global lab knowledge file and index it for Agent/RAG use."""
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in GLOBAL_KNOWLEDGE_EXTENSIONS:
@@ -56,6 +68,7 @@ async def upload_global_source(file: UploadFile = File(...), db: Session = Depen
         filepath=filepath,
         content_type=file.content_type,
     )
+    source.owner_id = principal.user_id
     db.commit()
     db.refresh(source)
     return source
@@ -72,14 +85,54 @@ async def get_source(source_id: int, db: Session = Depends(get_db)):
 
 @router.post("/sources/{source_id}/reindex", response_model=KnowledgeSourceResponse)
 async def reindex_source(source_id: int, db: Session = Depends(get_db)):
-    """Reindex a source. Case sources are refreshed directly; attachment/generated sources are immutable in MVP."""
+    """Reindex a source after parser, embedding, or vector backend changes."""
     source = db.query(KnowledgeSource).filter(KnowledgeSource.id == source_id).first()
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Knowledge source {source_id} does not exist")
     if source.source_type == "case" and source.case_id:
         source = upsert_case_source(db, source.case)
-        db.commit()
-        db.refresh(source)
+    elif source.attachment is not None:
+        text = extract_text_from_file(source.attachment.filepath, source.attachment.file_type)
+        source.content_hash = source.attachment.content_hash
+        source.metadata_json = {**(source.metadata_json or {}), "file_type": source.attachment.file_type, "filepath": source.attachment.filepath}
+        replace_source_chunks(db, source, text)
+    elif source.generated_content is not None:
+        text = object_to_text(source.generated_content.content)
+        source.metadata_json = {**(source.metadata_json or {}), "content_type": source.generated_content.content_type}
+        replace_source_chunks(db, source, text)
+    elif source.source_type == "global_attachment":
+        filepath = (source.metadata_json or {}).get("filepath")
+        if not filepath or not os.path.isfile(filepath):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Original global knowledge file is not available for reindex")
+        text = extract_text_from_file(filepath, (source.metadata_json or {}).get("file_type"))
+        replace_source_chunks(db, source, text)
+    db.commit()
+    db.refresh(source)
+    return source
+
+
+@router.patch("/sources/{source_id}/governance", response_model=KnowledgeSourceResponse)
+async def update_source_governance(
+    source_id: int,
+    payload: KnowledgeGovernanceUpdate,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Review, approve, deprecate, or archive an indexed knowledge source."""
+    if principal.role not in {"admin", "reviewer"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or reviewer role required")
+    source = db.query(KnowledgeSource).filter(KnowledgeSource.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Knowledge source {source_id} does not exist")
+    source.governance_status = payload.governance_status
+    source.reviewed_by_id = payload.reviewer_id or principal.user_id
+    source.reviewed_at = datetime.now(timezone.utc)
+    metadata = dict(source.metadata_json or {})
+    if payload.note:
+        metadata["governance_note"] = payload.note
+    source.metadata_json = metadata
+    db.commit()
+    db.refresh(source)
     return source
 
 
@@ -92,9 +145,10 @@ async def delete_source(source_id: int, db: Session = Depends(get_db)):
     if source.source_type != "global_attachment":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only global knowledge sources can be deleted from this endpoint")
     # Remove file from disk if it exists
-    if source.uri and os.path.isfile(source.uri):
+    filepath = (source.metadata_json or {}).get("filepath")
+    if filepath and os.path.isfile(filepath):
         try:
-            os.remove(source.uri)
+            os.remove(filepath)
         except OSError:
             pass
     db.delete(source)
@@ -117,4 +171,12 @@ async def search(request: KnowledgeSearchRequest, db: Session = Depends(get_db))
         task_id=request.task_id,
     )
     db.commit()
-    return KnowledgeSearchResponse(query=request.query, retrieval_run_id=run.id, results=results)
+    return KnowledgeSearchResponse(
+        query=request.query,
+        retrieval_run_id=run.id,
+        confidence=run.confidence or "low",
+        no_answer=bool(run.no_answer),
+        max_score=round(run.max_score or 0.0, 4),
+        message=(run.filters_json or {}).get("low_confidence_message"),
+        results=results,
+    )

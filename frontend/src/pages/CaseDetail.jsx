@@ -211,6 +211,7 @@ function CaseDetail() {
           <p className="muted">{t('caseDetail.created')}{new Date(caseData.created_at).toLocaleString()}</p>
         </div>
         <div className="action-row">
+          <a href={casesApi.bundleUrl(id)} className="btn btn-secondary" target="_blank" rel="noreferrer">Export bundle</a>
           <Link to={`/cases/${id}/edit`} className="btn btn-secondary">{t('common.edit')}</Link>
           <button onClick={handleDelete} className="btn btn-danger">{t('common.delete')}</button>
         </div>
@@ -231,10 +232,16 @@ function CaseDetail() {
             <p><strong>{t('caseDetail.overview.desc')}</strong>{caseData.description || t('caseDetail.overview.none')}</p>
             <p><strong>{t('caseDetail.overview.cavity')}</strong>{caseData.cavity_type}</p>
             <p><strong>{t('caseDetail.overview.goal')}</strong>{caseData.goal}</p>
+            <p><strong>Status: </strong>{caseData.status}</p>
+            <p><strong>Visibility: </strong>{caseData.visibility}</p>
+            <p><strong>Project ID: </strong>{caseData.project_id || '-'}</p>
+            <p><strong>Tags: </strong>{(caseData.tags || []).join(', ') || '-'}</p>
+            <p><strong>Safety notes: </strong>{caseData.safety_notes || '-'}</p>
+            <p><strong>Conclusions: </strong>{caseData.conclusions || '-'}</p>
           </div>
           <div className="card">
             <h2 className="card-title">{t('caseDetail.overview.paramsSymptoms')}</h2>
-            {renderJson({ parameters: caseData.parameters, symptoms: caseData.symptoms })}
+            {renderJson({ parameters: caseData.parameters, symptoms: caseData.symptoms, measurements: caseData.measurements })}
           </div>
         </div>
       )}
@@ -260,6 +267,8 @@ function CaseDetail() {
               <div key={source.id} className="source-row">
                 <strong>{source.title}</strong>
                 <span className="meta-pill">{source.source_type}</span>
+                <span className="meta-pill">{source.governance_status}</span>
+                <span className="meta-pill">v{source.version}</span>
               </div>
             ))}
           </div>
