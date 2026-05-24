@@ -63,11 +63,18 @@ function CasesList() {
                   </p>
                   <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', fontSize: '0.9rem', color: '#888' }}>
                     <span>{t('casesList.cavity')}: {getCavityTypeLabel(caseItem.cavity_type)}</span>
+                    <span>Status: {caseItem.status || 'draft'}</span>
+                    {caseItem.project_id && <span>Project: {caseItem.project_id}</span>}
                     <span>{t('casesList.created')}: {new Date(caseItem.created_at).toLocaleDateString()}</span>
                     {caseItem.symptoms?.length > 0 && (
                       <span>{t('casesList.symptoms')}: {caseItem.symptoms.length}{t('casesList.symptomsCount')}</span>
                     )}
                   </div>
+                  {caseItem.tags?.length > 0 && (
+                    <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      {caseItem.tags.map(tag => <span key={tag} className="meta-pill">{tag}</span>)}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem' }}>
                   <Link to={`/cases/${caseItem.id}/edit`} className="btn btn-secondary">{t('common.edit')}</Link>

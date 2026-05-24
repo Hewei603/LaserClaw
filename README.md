@@ -1,6 +1,6 @@
 # LaserClaw
 
-LaserClaw is a local-first **Tool-calling RAG Agent** workspace for laser experiment workflows. It combines experiment case management, global lab knowledge indexing, retrieval-augmented chat, structured artifact generation, citations, and persistent Agent traces.
+LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows**. It combines experiment case management, global lab knowledge indexing, case-specific evidence retrieval, structured AI artifact generation, persistent Agent traces, and collaboration-oriented governance.
 
 <img width="2534" height="1343" alt="image" src="https://github.com/user-attachments/assets/b8ebb7f4-f980-4671-8722-2ef0913f7f70" />
 
@@ -9,37 +9,78 @@ LaserClaw is a local-first **Tool-calling RAG Agent** workspace for laser experi
 
 ## What It Solves
 
-| Problem | LaserClaw Approach |
+| Problem | LaserClaw approach |
 |---|---|
-| Experiment context is scattered across notes, files, and prior runs | Case-aware RAG retrieval with source citations |
-| Troubleshooting is hard to reproduce | Tool-calling Agent creates structured diagnostic artifacts |
-| Plans, reports, and simulation drafts are repetitive | Saved structured artifacts for plan, troubleshooting, report, and ReZonator draft |
-| AI outputs are difficult to audit | Persistent task, step, tool-call, citation, and artifact records |
+| Lab knowledge is scattered across manuals, SOPs, notes, and case files | Two-tier RAG over global lab documents and case-specific documents |
+| AI answers are hard to audit | Stored retrieval runs, citations, generated artifacts, Agent steps, and tool calls |
+| Troubleshooting and reporting are repetitive | Structured generation for plans, troubleshooting, reports, and ReZonator drafts |
+| Research groups need long-term collaboration | Projects, users, groups, permissions, knowledge governance, versioned prompts/workflows, and case bundles |
 
 ## Core Features
 
-- **Case-aware Agent chat**: chat with the selected experiment case, recent conversation history, case data, and global lab knowledge.
-- **RAG knowledge base**: indexes cases, text attachments, generated artifacts, and global lab documents.
-- **Global lab documents**: upload shared PDFs, TXT, Markdown, CSV, JSON, or log files for all cases.
-- **Optimized local retrieval**: Chinese character n-grams, phrase expansion, section-aware chunking, section metadata, and lightweight domain reranking for safety vs optics queries.
-- **Tool routing**: routes user requests to chat, experiment plan, troubleshooting, report, or ReZonator draft.
-- **Structured artifacts**: validates generated plan, troubleshooting, report, and resonator JSON against schemas.
-- **Multi-provider support**: MockProvider, OpenAI-compatible Chat Completions, and Anthropic.
-- **Traceability**: persists Agent tasks, steps, tool calls, retrieved citations, generated contents, and audit logs.
-- **Bilingual UI**: English / Chinese frontend language switch.
+- **Case-aware Agent chat**: persistent chat sessions with recent conversation history, linked case data, retrieved knowledge, citations, and retrieval confidence.
+- **Two-tier RAG**: global lab documents are treated as lab-wide authority; case-specific attachments and generated artifacts provide local experimental context.
+- **Global knowledge base**: upload shared PDFs, TXT, Markdown, CSV, JSON, TSV, or log files for all cases.
+- **Case schema v2**: project ownership, status, visibility, tags, measurements, safety notes, conclusions, owner, and schema version.
+- **Knowledge governance**: source status (`draft`, `approved`, `deprecated`, `archived`), version, owner, reviewer, review time, and reindexing.
+- **Tool-calling Agent workflow**: routes user intent to chat, plan, troubleshooting, report, or ReZonator draft; persists tasks, steps, and tool calls.
+- **Structured AI artifacts**: saves plan, troubleshooting, report, image analysis, and resonator outputs as versioned generated content.
+- **Prompt/workflow versioning**: manage active prompt and workflow versions for reproducible AI runs.
+- **Case bundle export**: export a complete case archive with manifest, attachments, generated content, and knowledge metadata.
+- **RAG evals and benchmarks**: reproducible scripts and API for retrieval accuracy, latency, indexing throughput, and LLM JSON reliability.
+- **Provider support**: MockProvider, OpenAI-compatible Chat Completions, and Anthropic.
+- **Bilingual UI**: English / Chinese frontend language switching.
+
+## Architecture
+
+```text
+React + Vite frontend
+  -> FastAPI backend
+      -> Case / attachment / knowledge / generation / agent / collaboration APIs
+      -> SQLAlchemy models
+      -> SQLite locally or PostgreSQL in Docker
+      -> File uploads and global knowledge documents
+      -> RAG ingestion, chunking, embeddings, retrieval, citations
+      -> OpenAI / Anthropic / Mock provider
+      -> Audit logs, usage tracking, Agent traces, generated artifacts
+```
+
+## RAG Workflow
+
+```text
+Global PDF / case attachment / generated artifact
+  -> text extraction
+  -> chunking
+  -> embedding
+  -> KnowledgeSource + KnowledgeChunk
+  -> query-time retrieval
+  -> RetrievalRun + RetrievalResult
+  -> citation-ready context for chat or artifact generation
+```
+
+LaserClaw uses two retrieval tiers:
+
+1. **Global lab knowledge**: safety manuals, SOPs, optical component catalogs, and lab-wide operating rules. These are searched for every case and take precedence when they conflict with case-local data.
+2. **Case knowledge**: case data, attachments, image analysis, prior reports, and generated artifacts linked to the current case.
 
 <img width="2533" height="1339" alt="aaf64e0dd186049c62032c55c618898b" src="https://github.com/user-attachments/assets/ffc09e0d-93a4-4259-a07b-c943fbbf4cf9" />
 
 ## Agent Workflow
 
-```mermaid
-flowchart LR
-    A[User input] --> B[Route intent]
-    B --> C[Retrieve context]
-    C --> D[Call provider/tool]
-    D --> E[Validate schema]
-    E --> F[Persist artifact]
-    F --> G[Trace and citations]
+```text
+User message
+  -> create/find chat session
+  -> save user message
+  -> route intent
+  -> build context:
+       current message
+       recent chat history
+       linked case payload
+       global RAG results
+       case RAG results
+       citations and retrieval confidence
+  -> chat response or saved Agent task
+  -> save assistant message / task / artifact / citations
 ```
 
 ## Tool Routing
@@ -55,6 +96,8 @@ The app supports five intent classes:
 | Generate a ReZonator / resonator simulation draft | `generate_resonator_draft` |
 
 The chat API can auto-route generation requests, and direct task creation is also available through `POST /api/agent/tasks`.
+
+For ordinary chat, the backend sends a structured context to the provider. For generation requests, it creates an `AgentTask`, builds steps, calls tools, retrieves evidence, generates an artifact, saves it to the case, and stores the full trace.
 
 ## RAG and Knowledge Sources
 
@@ -118,16 +161,9 @@ Known benchmark limitations:
 Launch-LaserClaw.bat
 ```
 
-The launcher:
+The launcher installs backend/frontend dependencies and starts:
 
-- creates `backend/.venv` if needed
-- installs backend dependencies
-- installs frontend dependencies
-- starts FastAPI at `127.0.0.1:8000`
-- starts Vite at `127.0.0.1:5173`
-
-Open:
-
+- Backend API: <http://127.0.0.1:8000>
 - Frontend: <http://127.0.0.1:5173>
 - Agent workspace: <http://127.0.0.1:5173/agent>
 - API docs: <http://127.0.0.1:8000/docs>
@@ -138,8 +174,9 @@ Backend:
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+py -m pip install -r requirements.txt
+py -m alembic upgrade head
+py -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Frontend:
@@ -158,9 +195,9 @@ docker compose up -d --build
 
 Services:
 
-- frontend: `localhost:5173`
-- backend API: `localhost:8000`
-- API docs: `localhost:8000/docs`
+- Frontend: <http://localhost:5173>
+- Backend API: <http://localhost:8000>
+- API docs: <http://localhost:8000/docs>
 
 Stop:
 
@@ -170,28 +207,30 @@ docker compose down
 
 ## Environment Variables
 
-Create a local `.env` file for provider and runtime settings. Do not commit `.env` or API keys.
+Create `.env` for local provider and runtime configuration. Do not commit real API keys.
 
 ```env
 AI_PROVIDER=mock
+STRICT_PROVIDER=false
 
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5
+OPENAI_MODEL=gpt-4o
 OPENAI_BASE_URL=https://api.openai.com/v1
 
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-sonnet-4-5
-ANTHROPIC_MAX_TOKENS=2048
-ANTHROPIC_TEMPERATURE=0.2
-
-STRICT_PROVIDER=false
-REQUIRE_AUTH=false
-API_KEY=
 
 DATABASE_URL=sqlite:///./laserclaw.db
 UPLOAD_DIR=./uploads
-MAX_UPLOAD_SIZE=10485760
+MAX_UPLOAD_SIZE=52428800
 AUTO_CREATE_TABLES=true
+
+EMBEDDING_PROVIDER=local
+RETRIEVAL_BACKEND=sql_json
+VECTOR_STORE_DIR=./vector_store
+
+REQUIRE_AUTH=false
+API_KEY=
 
 VITE_API_URL=http://127.0.0.1:8000
 ```
@@ -202,27 +241,46 @@ Provider modes:
 - `openai`: OpenAI-compatible Chat Completions provider
 - `anthropic`: Anthropic provider
 
-If `STRICT_PROVIDER=false`, the app can fall back to MockProvider when a real provider is unavailable. Use `STRICT_PROVIDER=true` for strict evaluation.
+Use `STRICT_PROVIDER=true` for strict evaluation so missing or unavailable real providers fail clearly instead of falling back to MockProvider.
+
+## Benchmarking
+
+Run the reproducible benchmark:
+
+```powershell
+py backend\scripts\benchmark_resume_metrics.py --repeats 10 --top-k 5
+```
+
+Skip real LLM calls:
+
+```powershell
+py backend\scripts\benchmark_resume_metrics.py --repeats 10 --top-k 5 --skip-llm
+```
+
+Reports are generated locally and are not tracked in Git:
+
+```text
+docs/benchmarks/
+```
 
 ## Tests
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q
+py -m pytest tests -q
 ```
 
 Current local result:
 
 ```text
-120 passed
+127 passed
 ```
 
-Useful targeted tests:
+Frontend build:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_router.py -q
-.\.venv\Scripts\python.exe -m pytest tests\test_schemas.py -q
-.\.venv\Scripts\python.exe -m pytest tests\test_knowledge_agent.py -q
+cd frontend
+npm run build
 ```
 
 ## API Surface
@@ -232,22 +290,27 @@ Core endpoints:
 - `POST /api/cases`
 - `GET /api/cases`
 - `GET /api/cases/{case_id}`
+- `GET /api/cases/{case_id}/bundle`
+- `POST /api/cases/{case_id}/attachments`
 - `POST /api/cases/{case_id}/generate-plan`
 - `POST /api/cases/{case_id}/generate-troubleshooting`
 - `POST /api/cases/{case_id}/generate-report`
 - `POST /api/cases/{case_id}/generate-rezonator`
-- `GET /api/cases/{case_id}/generated-contents`
 - `POST /api/knowledge/sources/upload`
 - `GET /api/knowledge/sources`
+- `PATCH /api/knowledge/sources/{source_id}/governance`
 - `POST /api/knowledge/search`
 - `POST /api/agent/chat`
 - `POST /api/agent/tasks`
 - `GET /api/agent/tasks/{task_id}`
-- `GET /api/agent/tasks/{task_id}/tool-calls`
+- `POST /api/collaboration/users`
+- `POST /api/collaboration/groups`
+- `POST /api/collaboration/projects`
+- `POST /api/versioning/prompts`
+- `POST /api/versioning/workflows`
+- `POST /api/evals/rag`
 
-## Persistence
-
-Important tables:
+## Important Tables
 
 - `experiment_cases`
 - `attachments`
@@ -261,47 +324,54 @@ Important tables:
 - `agent_steps`
 - `agent_tool_calls`
 - `generated_contents`
+- `organizations`
+- `users`
+- `groups`
+- `projects`
+- `prompt_versions`
+- `workflow_versions`
+- `rag_eval_runs`
 - `audit_logs`
 
 ## Project Structure
 
 ```text
 LaserClaw/
-├── backend/
-│   ├── app/
-│   │   ├── agent/        # routing, context, planner, orchestrator, tools
-│   │   ├── api/          # FastAPI routes
-│   │   ├── auth/         # optional API-key auth
-│   │   ├── knowledge/    # ingestion, chunking, local embeddings, retrieval
-│   │   ├── models/       # SQLAlchemy models
-│   │   ├── observability/
-│   │   ├── providers/    # Mock, OpenAI, Anthropic
-│   │   └── schemas/
-│   ├── alembic/
-│   ├── data/knowledge/   # synthetic/demo knowledge files
-│   ├── tests/
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── api/
-│   │   ├── pages/
-│   │   ├── LanguageContext.jsx
-│   │   └── i18n.js
-│   └── package.json
-├── Launch-LaserClaw.bat
-├── docker-compose.yml
-├── README.md
-└── READMEcn.md
+|-- backend/
+|   |-- app/
+|   |   |-- agent/          # context, routing, planner, orchestrator, tools
+|   |   |-- api/            # FastAPI routes
+|   |   |-- auth/           # API-key auth and coarse roles
+|   |   |-- knowledge/      # ingestion, chunking, embeddings, retrieval
+|   |   |-- models/         # SQLAlchemy models
+|   |   |-- observability/  # audit and usage accounting
+|   |   |-- providers/      # Mock, OpenAI, Anthropic
+|   |   `-- schemas/
+|   |-- alembic/
+|   |-- scripts/
+|   |-- tests/
+|   `-- requirements.txt
+|-- frontend/
+|   |-- src/
+|   |   |-- api/
+|   |   |-- pages/
+|   |   |-- LanguageContext.jsx
+|   |   `-- i18n.js
+|   `-- package.json
+|-- docs/
+|-- Launch-LaserClaw.bat
+|-- docker-compose.yml
+|-- README.md
+`-- READMEcn.md
 ```
 
-## Roadmap
+## Current Limitations
 
-- Add calibrated no-answer thresholds for RAG.
-- Add production embedding provider support and vector database storage.
-- Persist provider usage, tokens, and cost estimates.
-- Add stronger reranking for section-level citation correctness.
-- Add optional LangSmith or OpenTelemetry tracing.
-- Expand benchmarks with real, permissioned lab documents and human-labeled queries.
+- Project/user/group models exist, but fine-grained endpoint authorization still needs hardening.
+- Large-corpus retrieval should use a vector backend before claiming production-scale latency.
+- Long chat sessions use a recent-message window; automatic long-term memory summarization is not implemented yet.
+- Benchmarks use synthetic evaluation documents unless replaced with permissioned real lab documents.
+- Generated content is advisory and must not be treated as authoritative safety or operating instructions.
 
 ## License
 

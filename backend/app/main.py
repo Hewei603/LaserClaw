@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import admin, agent, attachments, cases, generation, knowledge
+from .api import admin, agent, attachments, cases, collaboration, evals, generation, knowledge, versioning
 from .config import get_settings
 from .database import Base, engine
 from . import models  # noqa: F401 - register SQLAlchemy models
@@ -59,6 +59,9 @@ app.include_router(generation.router, prefix="/api/cases", tags=["generation"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["knowledge"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(collaboration.router, prefix="/api/collaboration", tags=["collaboration"])
+app.include_router(versioning.router, prefix="/api/versioning", tags=["versioning"])
+app.include_router(evals.router, prefix="/api/evals", tags=["evals"])
 
 
 @app.get("/")

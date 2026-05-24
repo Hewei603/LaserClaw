@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..knowledge.ingestion import create_generated_content_source
 from ..models import AgentStep, AgentTask, ExperimentCase, GeneratedContent
 from ..observability.audit import record_audit
+from ..observability.usage import apply_usage_to_generated
 from ..providers import get_ai_provider
 from .guardrails import assess_risk
 from .planner import build_plan
@@ -112,6 +113,7 @@ async def create_and_run_task(
             content=content,
             prompt_version=f"agent_{mode}_v1",
         )
+        apply_usage_to_generated(generated, content)
         if case_id is None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A case_id is required to save an Agent artifact")
         db.add(generated)

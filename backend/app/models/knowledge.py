@@ -1,5 +1,5 @@
 """Knowledge and retrieval models."""
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -19,6 +19,11 @@ class KnowledgeSource(Base):
     title = Column(String(255), nullable=False)
     uri = Column(String(512))
     content_hash = Column(String(64), index=True)
+    governance_status = Column(String(50), default="draft", index=True)
+    version = Column(Integer, default=1)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    reviewed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True))
     metadata_json = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -26,6 +31,8 @@ class KnowledgeSource(Base):
     case = relationship("ExperimentCase", back_populates="knowledge_sources")
     attachment = relationship("Attachment", back_populates="knowledge_sources")
     generated_content = relationship("GeneratedContent", back_populates="knowledge_sources")
+    owner = relationship("User", foreign_keys=[owner_id])
+    reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
     chunks = relationship("KnowledgeChunk", back_populates="source", cascade="all, delete-orphan")
 
 
@@ -57,6 +64,9 @@ class RetrievalRun(Base):
     query = Column(Text, nullable=False)
     filters_json = Column(JSON, default=dict)
     top_k = Column(Integer, default=5)
+    max_score = Column(Float, default=0.0)
+    confidence = Column(String(50), default="low")
+    no_answer = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     results = relationship("RetrievalResult", back_populates="retrieval_run", cascade="all, delete-orphan")

@@ -25,8 +25,20 @@ def test_case_is_indexed_and_searchable(client):
     assert response.status_code == 200
     data = response.json()
     assert data["retrieval_run_id"]
+    assert data["confidence"] in {"high", "medium", "low"}
+    assert "max_score" in data
     assert data["results"]
     assert data["results"][0]["source_type"] == "case"
+
+
+def test_search_marks_unanswerable_queries_low_confidence(client):
+    response = client.post("/api/knowledge/search", json={"query": "unrelated coffee machine warranty policy"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["no_answer"] is True
+    assert data["confidence"] == "low"
+    assert data["message"]
 
 
 def test_attachment_upload_indexes_text(client):
@@ -68,7 +80,8 @@ def test_generation_returns_citations(client):
     assert response.status_code == 200
     content = response.json()["content"]
     assert "citations" in content
-    assert content["confidence"] in {"medium", "low"}
+    assert content["confidence"] in {"high", "medium", "low"}
+    assert "retrieval" in content
 
 
 def test_agent_task_persists_steps_tool_calls_and_artifact(client):
@@ -145,6 +158,19 @@ def test_global_knowledge_upload_is_used_by_agent_chat(client):
     assert any(citation["source_type"] == "global_attachment" for citation in citations)
 
 
+def test_global_knowledge_source_can_be_reindexed(client):
+    upload = client.post(
+        "/api/knowledge/sources/upload",
+        files={"file": ("lab-sop.txt", BytesIO(b"Lab SOP requires beam dumps before alignment."), "text/plain")},
+    )
+    assert upload.status_code == 201
+
+    reindex = client.post(f"/api/knowledge/sources/{upload.json()['id']}/reindex")
+
+    assert reindex.status_code == 200
+    assert reindex.json()["id"] == upload.json()["id"]
+
+
 def test_agent_chat_provider_failure_returns_bad_gateway(client, monkeypatch):
     case_id = _create_case(client)
 
@@ -172,3 +198,18 @@ def test_audit_logs_are_role_protected(client):
     allowed = client.get("/api/admin/audit-logs", headers={"x-user-role": "admin"})
     assert allowed.status_code == 200
     assert any(item["action"] == "case.create" for item in allowed.json())
+
+
+def test_usage_summary_is_role_protected_and_counts_generated_content(client):
+    case_id = _create_case(client)
+    generated = client.post(f"/api/cases/{case_id}/generate-plan", json={"use_rag": True})
+    assert generated.status_code == 200
+
+    forbidden = client.get("/api/admin/usage-summary")
+    assert forbidden.status_code == 403
+
+    allowed = client.get("/api/admin/usage-summary", headers={"x-user-role": "admin"})
+    assert allowed.status_code == 200
+    payload = allowed.json()
+    assert payload["requests"] >= 1
+    assert "by_model" in payload

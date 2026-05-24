@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # File upload settings
     upload_dir: str = "/app/uploads"
-    max_upload_size: int = 10485760  # 10MB
+    max_upload_size: int = 52428800  # 50MB
 
     # AI provider settings
     ai_provider: str = "mock"  # mock, openai, anthropic
@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     auto_create_tables: bool = True
     require_auth: bool = False
     api_key: Optional[str] = None
+
+    # RAG and embedding settings
+    embedding_provider: str = "local"  # local, openai, sentence_transformers
+    embedding_model: str = "text-embedding-3-small"
+    retrieval_backend: str = "sql_json"  # sql_json; optional vector DB adapters can share this interface
+    vector_store_dir: str = "/app/vector_store"
+    retrieval_vector_weight: float = 0.72
+    retrieval_lexical_weight: float = 0.28
+    retrieval_min_score: float = 0.08
+    retrieval_low_confidence_score: float = 0.14
+    retrieval_min_results: int = 1
 
     # CORS settings
     cors_origins: list[str] = [

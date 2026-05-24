@@ -6,12 +6,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExperimentCaseBase(BaseModel):
+    project_id: Optional[int] = None
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     cavity_type: str = Field(..., pattern="^(linear|ring|bow-tie|custom)$")
     goal: str = Field(..., min_length=1)
+    status: str = Field(default="draft", pattern="^(draft|active|paused|completed|archived)$")
+    visibility: str = Field(default="project", pattern="^(private|project|organization)$")
+    schema_version: str = "case_v2"
+    tags: List[str] = Field(default_factory=list)
     parameters: Dict[str, Any] = Field(default_factory=dict)
     symptoms: List[str] = Field(default_factory=list)
+    measurements: Dict[str, Any] = Field(default_factory=dict)
+    safety_notes: Optional[str] = None
+    conclusions: Optional[str] = None
+    owner_id: Optional[int] = None
 
 
 class ExperimentCaseCreate(ExperimentCaseBase):
@@ -19,12 +28,21 @@ class ExperimentCaseCreate(ExperimentCaseBase):
 
 
 class ExperimentCaseUpdate(BaseModel):
+    project_id: Optional[int] = None
     title: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     cavity_type: Optional[str] = Field(None, pattern="^(linear|ring|bow-tie|custom)$")
     goal: Optional[str] = Field(None, min_length=1)
+    status: Optional[str] = Field(None, pattern="^(draft|active|paused|completed|archived)$")
+    visibility: Optional[str] = Field(None, pattern="^(private|project|organization)$")
+    schema_version: Optional[str] = None
+    tags: Optional[List[str]] = None
     parameters: Optional[Dict[str, Any]] = None
     symptoms: Optional[List[str]] = None
+    measurements: Optional[Dict[str, Any]] = None
+    safety_notes: Optional[str] = None
+    conclusions: Optional[str] = None
+    owner_id: Optional[int] = None
 
 
 class ExperimentCaseResponse(ExperimentCaseBase):
@@ -85,6 +103,11 @@ class KnowledgeSourceResponse(BaseModel):
     title: str
     uri: Optional[str] = None
     content_hash: Optional[str] = None
+    governance_status: str = "draft"
+    version: int = 1
+    owner_id: Optional[int] = None
+    reviewed_by_id: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
     metadata_json: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
@@ -114,6 +137,10 @@ class KnowledgeSearchResult(BaseModel):
 class KnowledgeSearchResponse(BaseModel):
     query: str
     retrieval_run_id: int
+    confidence: str = "low"
+    no_answer: bool = False
+    max_score: float = 0.0
+    message: Optional[str] = None
     results: List[KnowledgeSearchResult]
 
 
@@ -223,6 +250,130 @@ class AuditLogResponse(BaseModel):
     resource_id: Optional[str] = None
     request_id: Optional[str] = None
     metadata_json: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrganizationCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class OrganizationResponse(OrganizationCreate):
+    id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserCreate(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    display_name: str = Field(..., min_length=1, max_length=255)
+    role: str = Field(default="user", pattern="^(user|reviewer|admin)$")
+    organization_id: Optional[int] = None
+
+
+class UserResponse(UserCreate):
+    id: int
+    is_active: bool = True
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    organization_id: Optional[int] = None
+
+
+class GroupResponse(GroupCreate):
+    id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MembershipCreate(BaseModel):
+    user_id: Optional[int] = None
+    group_id: Optional[int] = None
+    role: str = Field(default="viewer", pattern="^(viewer|editor|owner|member)$")
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    organization_id: Optional[int] = None
+    visibility: str = Field(default="private", pattern="^(private|organization)$")
+
+
+class ProjectResponse(ProjectCreate):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class KnowledgeGovernanceUpdate(BaseModel):
+    governance_status: str = Field(..., pattern="^(draft|approved|deprecated|archived)$")
+    reviewer_id: Optional[int] = None
+    note: Optional[str] = None
+
+
+class PromptVersionCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    version: str = Field(..., min_length=1, max_length=50)
+    content: str = Field(..., min_length=1)
+    metadata_json: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = False
+    created_by_id: Optional[int] = None
+
+
+class PromptVersionResponse(PromptVersionCreate):
+    id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkflowVersionCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    version: str = Field(..., min_length=1, max_length=50)
+    definition: Dict[str, Any]
+    metadata_json: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = False
+    created_by_id: Optional[int] = None
+
+
+class WorkflowVersionResponse(WorkflowVersionCreate):
+    id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RagEvalItem(BaseModel):
+    query: str = Field(..., min_length=1)
+    expected_source_ids: List[int] = Field(default_factory=list)
+    expected_terms: List[str] = Field(default_factory=list)
+    case_id: Optional[int] = None
+
+
+class RagEvalRequest(BaseModel):
+    name: str = Field(default="ad hoc rag eval", min_length=1, max_length=255)
+    top_k: int = Field(default=5, ge=1, le=20)
+    dataset: List[RagEvalItem] = Field(..., min_length=1)
+
+
+class RagEvalRunResponse(BaseModel):
+    id: int
+    name: str
+    dataset: List[Dict[str, Any]]
+    results: List[Dict[str, Any]]
+    total_questions: int
+    hit_rate: float
+    mean_max_score: float
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

@@ -24,7 +24,7 @@ services:
     environment:
       DATABASE_URL: postgresql://laserclaw:laserclaw123@db:5432/laserclaw
       UPLOAD_DIR: /app/uploads
-      MAX_UPLOAD_SIZE: 10485760
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-52428800}
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
@@ -36,9 +36,19 @@ services:
       AUTO_CREATE_TABLES: "false"
       REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
       API_KEY: ${API_KEY:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-sql_json}
+      VECTOR_STORE_DIR: ${VECTOR_STORE_DIR:-/app/vector_store}
+      RETRIEVAL_VECTOR_WEIGHT: ${RETRIEVAL_VECTOR_WEIGHT:-0.72}
+      RETRIEVAL_LEXICAL_WEIGHT: ${RETRIEVAL_LEXICAL_WEIGHT:-0.28}
+      RETRIEVAL_MIN_SCORE: ${RETRIEVAL_MIN_SCORE:-0.08}
+      RETRIEVAL_LOW_CONFIDENCE_SCORE: ${RETRIEVAL_LOW_CONFIDENCE_SCORE:-0.14}
+      RETRIEVAL_MIN_RESULTS: ${RETRIEVAL_MIN_RESULTS:-1}
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads
+      - backend_vector_store:/app/vector_store
     ports:
       - "8000:8000"
     depends_on:
@@ -65,3 +75,4 @@ services:
 volumes:
   postgres_data:
   backend_uploads:
+  backend_vector_store:

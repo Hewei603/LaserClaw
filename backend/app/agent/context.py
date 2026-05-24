@@ -51,6 +51,10 @@ def build_chat_context(
         "chat_history": history_payload,
         "retrieved_knowledge": retrieved,
         "citations": citations,
+        "retrieval_confidence": run.confidence,
+        "retrieval_no_answer": bool(run.no_answer),
+        "retrieval_max_score": round(run.max_score or 0.0, 4),
+        "retrieval_message": (run.filters_json or {}).get("low_confidence_message"),
         "instructions": [
             "Answer as a case-aware laser experiment assistant.",
             "Retrieved knowledge is split into two tiers: 'global' (lab-wide SOPs, safety rules, equipment catalogs — treat these as authoritative lab constitution) and 'case' (attachments specific to the linked case — treat these as supplementary experimental data).",

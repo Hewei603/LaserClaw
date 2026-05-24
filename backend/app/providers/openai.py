@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from .base import AIProvider
 from ..config import get_settings
+from ..observability.usage import attach_usage_payload
 
 try:
     from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
@@ -219,7 +220,16 @@ Return JSON with this shape:
                         task_name,
                         getattr(choice, "finish_reason", None),
                     )
-                return self._parse_json_response(content, task_name)
+                parsed = self._parse_json_response(content, task_name)
+                usage = getattr(response, "usage", None)
+                usage_payload = {
+                    "input_tokens": getattr(usage, "prompt_tokens", None),
+                    "output_tokens": getattr(usage, "completion_tokens", None),
+                    "total_tokens": getattr(usage, "total_tokens", None),
+                }
+                parsed.setdefault("model_provider", "openai")
+                parsed.setdefault("model", self.model)
+                return attach_usage_payload(parsed, provider="openai", model=self.model, usage=usage_payload)
 
             except OPENAI_RETRYABLE_ERRORS as exc:
                 last_error = exc
@@ -298,4 +308,15 @@ Return JSON with this shape:
             max_completion_tokens=2500,
             timeout=120,
         )
-        return self._parse_json_response(response.choices[0].message.content, task_name)
+        parsed = self._parse_json_response(response.choices[0].message.content, task_name)
+        usage = getattr(response, "usage", None)
+        return attach_usage_payload(
+            parsed,
+            provider="openai",
+            model=self.model,
+            usage={
+                "input_tokens": getattr(usage, "prompt_tokens", None),
+                "output_tokens": getattr(usage, "completion_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            },
+        )

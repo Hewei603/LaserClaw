@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from .base import AIProvider
 from ..config import get_settings
+from ..observability.usage import attach_usage_payload
 
 try:
     from anthropic import Anthropic, APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
@@ -212,14 +213,14 @@ Return JSON with this shape:
         return await self._create_json_message(system_prompt, content)
 
     async def _create_json_message(self, system_prompt: str, user_prompt: str | list[dict[str, Any]]) -> dict:
-        raw_text = await self._send_message(system_prompt, user_prompt)
+        raw_text, usage = await self._send_message(system_prompt, user_prompt)
         try:
             result = self._extract_json(raw_text)
         except Exception as exc:
             result = await self._repair_json(raw_text, exc)
         result.setdefault("model_provider", "anthropic")
         result.setdefault("model", self.model)
-        return result
+        return attach_usage_payload(result, provider="anthropic", model=self.model, usage=usage)
 
     def _extract_json(self, text: str) -> dict:
         if not text or not text.strip():
@@ -246,7 +247,7 @@ Return JSON with this shape:
             f"JSON parse error: {type(error).__name__}: {str(error)[:500]}\n\n"
             f"Raw response:\n{raw_text[:6000]}"
         )
-        repaired_text = await self._send_message(self._system_prompt(), repair_prompt)
+        repaired_text, _ = await self._send_message(self._system_prompt(), repair_prompt)
         try:
             return self._extract_json(repaired_text)
         except Exception as repair_error:
@@ -254,7 +255,7 @@ Return JSON with this shape:
                 f"Anthropic returned invalid JSON after repair: {type(repair_error).__name__}"
             ) from repair_error
 
-    async def _send_message(self, system_prompt: str, user_prompt: str | list[dict[str, Any]]) -> str:
+    async def _send_message(self, system_prompt: str, user_prompt: str | list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         last_error: BaseException | None = None
         for attempt in range(2):
             try:
@@ -266,7 +267,12 @@ Return JSON with this shape:
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_prompt}],
                 )
-                return self._message_text(response)
+                usage = getattr(response, "usage", None)
+                usage_payload = {
+                    "input_tokens": getattr(usage, "input_tokens", None),
+                    "output_tokens": getattr(usage, "output_tokens", None),
+                }
+                return self._message_text(response), usage_payload
             except ANTHROPIC_RETRYABLE_ERRORS as exc:
                 last_error = exc
                 logger.warning(
