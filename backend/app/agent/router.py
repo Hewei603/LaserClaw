@@ -13,8 +13,24 @@ TOOL_PLAN = "generate_plan"
 TOOL_TROUBLESHOOTING = "generate_troubleshooting"
 TOOL_REPORT = "generate_report"
 TOOL_RESONATOR = "generate_resonator_draft"
+TOOL_STABILITY = "run_stability_analysis"
+TOOL_BEAM_PROFILE = "run_beam_profile_analysis"
+TOOL_SPECTRUM = "run_spectrum_analysis"
+TOOL_COMPONENTS = "generate_component_list"
+TOOL_MODULE_MANAGEMENT = "manage_case_modules"
 
-ALL_TOOLS = [TOOL_CHAT, TOOL_PLAN, TOOL_TROUBLESHOOTING, TOOL_REPORT, TOOL_RESONATOR]
+ALL_TOOLS = [
+    TOOL_CHAT,
+    TOOL_PLAN,
+    TOOL_TROUBLESHOOTING,
+    TOOL_REPORT,
+    TOOL_RESONATOR,
+    TOOL_STABILITY,
+    TOOL_BEAM_PROFILE,
+    TOOL_SPECTRUM,
+    TOOL_COMPONENTS,
+    TOOL_MODULE_MANAGEMENT,
+]
 
 # ---------------------------------------------------------------------------
 # Rule patterns (Chinese + English)
@@ -51,6 +67,30 @@ _RESONATOR_PATTERNS = [
     r"simulation input", r"cavity design", r"mode calculation",
 ]
 
+_STABILITY_PATTERNS = [
+    r"稳定性测量", r"功率稳定性", r"功率计读数", r"功率计照片", r"OCR读数", r"ocr读数",
+    r"稳定性报告", r"power meter OCR", r"power stability report", r"stability report",
+]
+
+_BEAM_PROFILE_PATTERNS = [
+    r"光斑分析", r"光斑直径", r"光斑半径", r"椭圆度", r"BeamGage", r"beamgage",
+    r"beam profile", r"beam spot", r"spot size", r"ellipticity",
+]
+
+_SPECTRUM_PATTERNS = [
+    r"光谱", r"中心波长", r"峰值波长", r"谱宽", r"半高宽", r"FWHM", r"fwhm",
+    r"spectrum", r"spectral", r"linewidth",
+]
+
+_COMPONENT_PATTERNS = [
+    r"器件清单", r"元件清单", r"采购表", r"采购清单", r"已有器件", r"需要采购",
+    r"component list", r"equipment list", r"procurement", r"bill of materials", r"BOM",
+]
+
+_MODULE_PATTERNS = [
+    r"模块", r"添加模块", r"更改模块", r"删除模块", r"case module", r"module",
+]
+
 
 def _compile(patterns: list[str]) -> re.Pattern[str]:
     return re.compile("|".join(patterns), re.IGNORECASE)
@@ -60,6 +100,11 @@ _RE_PLAN = _compile(_PLAN_PATTERNS)
 _RE_TROUBLESHOOTING = _compile(_TROUBLESHOOTING_PATTERNS)
 _RE_REPORT = _compile(_REPORT_PATTERNS)
 _RE_RESONATOR = _compile(_RESONATOR_PATTERNS)
+_RE_STABILITY = _compile(_STABILITY_PATTERNS)
+_RE_BEAM_PROFILE = _compile(_BEAM_PROFILE_PATTERNS)
+_RE_SPECTRUM = _compile(_SPECTRUM_PATTERNS)
+_RE_COMPONENTS = _compile(_COMPONENT_PATTERNS)
+_RE_MODULES = _compile(_MODULE_PATTERNS)
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +128,11 @@ def _rule_route(text: str) -> RouteResult | None:
     matches: list[tuple[str, re.Match[str]]] = []
 
     for tool, pattern in [
+        (TOOL_STABILITY, _RE_STABILITY),
+        (TOOL_BEAM_PROFILE, _RE_BEAM_PROFILE),
+        (TOOL_SPECTRUM, _RE_SPECTRUM),
+        (TOOL_COMPONENTS, _RE_COMPONENTS),
+        (TOOL_MODULE_MANAGEMENT, _RE_MODULES),
         (TOOL_RESONATOR, _RE_RESONATOR),
         (TOOL_TROUBLESHOOTING, _RE_TROUBLESHOOTING),
         (TOOL_REPORT, _RE_REPORT),

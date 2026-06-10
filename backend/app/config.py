@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./laserclaw.db"
 
     # File upload settings
-    upload_dir: str = "/app/uploads"
+    upload_dir: str = "./uploads"
     max_upload_size: int = 52428800  # 50MB
 
     # AI provider settings
@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     retrieval_min_score: float = 0.08
     retrieval_low_confidence_score: float = 0.14
     retrieval_min_results: int = 1
+    retrieval_answer_margin_min: float = 0.03
+    retrieval_negative_policy: str = "score_and_margin"
+    pgvector_table: str = "knowledge_chunk_vectors"
+    pgvector_dimension: int = 384
+
+    # Reranker settings
+    reranker_provider: str = "none"  # none, sentence_transformers, cohere
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_top_k: int = 20
+    reranker_weight: float = 0.65
 
     # CORS settings
     cors_origins: list[str] = [

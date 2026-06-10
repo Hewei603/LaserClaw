@@ -32,10 +32,13 @@ build/
 # Uploads
 backend/uploads/*
 !backend/uploads/.gitkeep
+backend/uploads/authorized_lab_docs/*
 
 # Local generated data
 backend/data/knowledge/
 docs/benchmarks/
+docs/evals/private/*
+!docs/evals/private/.gitkeep
 
 # Docker
 .dockerignore
