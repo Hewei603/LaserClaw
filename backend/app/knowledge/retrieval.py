@@ -9,6 +9,7 @@ from sqlalchemy import or_
 from ..models import KnowledgeChunk, KnowledgeSource, RetrievalResult, RetrievalRun
 from ..schemas import Citation, KnowledgeSearchResult
 from .embeddings import cosine_similarity, embed_text, lexical_similarity, tokenize
+from .reranking import rerank_chunks
 from .vector_store import chunks_by_ids, query_chunk_ids
 
 
@@ -85,6 +86,7 @@ def _vector_store_score_chunks(
     source_type: str | None = None,
 ) -> list[tuple[float, KnowledgeChunk]]:
     scored_ids = query_chunk_ids(
+        db,
         query_embedding=query_embedding,
         top_k=max(top_k * 4, top_k),
         case_id=case_id,
@@ -104,13 +106,27 @@ def _vector_store_score_chunks(
     return scored[:top_k]
 
 
-def _confidence(max_score: float, result_count: int) -> tuple[str, bool, str | None]:
+def _confidence(selected: list[tuple[float, KnowledgeChunk]]) -> tuple[str, bool, str | None]:
     settings = get_settings()
+    result_count = len(selected)
+    max_score = selected[0][0] if selected else 0.0
+    second_score = selected[1][0] if len(selected) > 1 else 0.0
+    margin = max_score - second_score
     if result_count < settings.retrieval_min_results or max_score < settings.retrieval_min_score:
         return (
             "low",
             True,
             "The knowledge base does not contain enough evidence for this question. Review the source documents manually.",
+        )
+    if (
+        settings.retrieval_negative_policy == "score_and_margin"
+        and max_score < 0.28
+        and margin < settings.retrieval_answer_margin_min
+    ):
+        return (
+            "low",
+            True,
+            "Retrieved evidence is weak and ambiguous. Inspect the source documents before answering.",
         )
     if max_score < settings.retrieval_low_confidence_score:
         return (
@@ -133,7 +149,7 @@ def _new_retrieval_run(
     selected: list[tuple[float, KnowledgeChunk]],
 ) -> RetrievalRun:
     max_score = selected[0][0] if selected else 0.0
-    confidence, no_answer, message = _confidence(max_score, len(selected))
+    confidence, no_answer, message = _confidence(selected)
     run = RetrievalRun(
         task_id=task_id,
         query=query,
@@ -156,12 +172,19 @@ def search_knowledge(
     source_type: str | None = None,
     top_k: int = 5,
     task_id: int | None = None,
+    allowed_case_ids: list[int] | None = None,
 ) -> tuple[RetrievalRun, list[KnowledgeSearchResult]]:
     """Search knowledge chunks and persist a retrieval audit record."""
     query_embedding = embed_text(query)
     active_source_filter = or_(KnowledgeSource.governance_status.is_(None), KnowledgeSource.governance_status != "archived")
     chunk_query = db.query(KnowledgeChunk).join(KnowledgeSource).filter(active_source_filter)
     filters: dict[str, object] = {}
+    if allowed_case_ids is not None and case_id is None:
+        chunk_query = chunk_query.filter(or_(KnowledgeSource.case_id.is_(None), KnowledgeSource.case_id.in_(allowed_case_ids)))
+        filters["allowed_case_ids"] = allowed_case_ids
+    if allowed_case_ids is not None and case_id is not None and case_id not in allowed_case_ids:
+        chunk_query = chunk_query.filter(KnowledgeSource.case_id == -1)
+        filters["allowed_case_ids"] = allowed_case_ids
     if case_id is not None:
         chunk_query = chunk_query.filter(KnowledgeSource.case_id == case_id)
         filters["case_id"] = case_id
@@ -177,9 +200,18 @@ def search_knowledge(
         case_id=case_id,
         source_type=source_type,
     )
+    if allowed_case_ids is not None:
+        scored = [
+            (score, chunk)
+            for score, chunk in scored
+            if chunk.source.case_id is None or chunk.source.case_id in allowed_case_ids
+        ]
     if not scored:
         scored = _sql_score_chunks(query, query_embedding, chunk_query)
-    selected = scored[:top_k]
+
+    settings = get_settings()
+    candidate_k = max(top_k * 4, settings.reranker_top_k)
+    selected = rerank_chunks(query, scored[:candidate_k], top_k=top_k)
 
     run = _new_retrieval_run(db, task_id=task_id, query=query, filters=filters, top_k=top_k, selected=selected)
 
@@ -225,6 +257,7 @@ def search_case_and_global_knowledge(
     task_id: int | None = None,
     global_slots: int = 5,
     case_slots: int = 3,
+    allowed_case_ids: list[int] | None = None,
 ) -> tuple[RetrievalRun, list[KnowledgeSearchResult]]:
     """Two-tier retrieval: global lab docs always fill first N slots (the 'constitution'),
     then case-specific attachments fill the remaining slots.
@@ -252,11 +285,12 @@ def search_case_and_global_knowledge(
         case_id=0,
     )
     if not global_scored:
-        global_scored = _score_chunks(global_query)[:global_slots]
+        global_scored = _score_chunks(global_query)
+    global_scored = rerank_chunks(query, global_scored[:max(global_slots * 4, get_settings().reranker_top_k)], top_k=global_slots)
 
     # --- Tier 2: case-specific attachments (only when a case is linked) ---
     case_scored: list[tuple[float, KnowledgeChunk]] = []
-    if case_id is not None:
+    if case_id is not None and (allowed_case_ids is None or case_id in allowed_case_ids):
         case_query = (
             db.query(KnowledgeChunk)
             .join(KnowledgeSource)
@@ -270,7 +304,8 @@ def search_case_and_global_knowledge(
             case_id=case_id,
         )
         if not case_scored:
-            case_scored = _score_chunks(case_query)[:case_slots]
+            case_scored = _score_chunks(case_query)
+        case_scored = rerank_chunks(query, case_scored[:max(case_slots * 4, get_settings().reranker_top_k)], top_k=case_slots)
 
     filters = {
         "scope": "case_and_global" if case_id is not None else "global",

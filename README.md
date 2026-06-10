@@ -28,6 +28,9 @@ LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows*
 - **Prompt/workflow versioning**: manage active prompt and workflow versions for reproducible AI runs.
 - **Case bundle export**: export a complete case archive with manifest, attachments, generated content, and knowledge metadata.
 - **RAG evals and benchmarks**: reproducible scripts and API for retrieval accuracy, latency, indexing throughput, and LLM JSON reliability.
+- **Production retrieval options**: deterministic `sql_json`, Chroma dense retrieval, pgvector retrieval, and optional cross-encoder reranking.
+- **Project-level ACL**: case, knowledge search, attachments, generation, Agent tasks, case modules, and bundle export follow case/project permissions.
+- **Conversation memory**: rolling summaries and durable memory items augment long chat sessions while keeping RAG citations authoritative.
 - **Provider support**: MockProvider, OpenAI-compatible Chat Completions, and Anthropic.
 - **Bilingual UI**: English / Chinese frontend language switching.
 
@@ -101,13 +104,22 @@ For ordinary chat, the backend sends a structured context to the provider. For g
 
 ## RAG and Knowledge Sources
 
-The current RAG stack is deterministic and local. It does not require a vector database:
+The default RAG stack is deterministic and local. It does not require a vector database:
 
 - tokenization: ASCII terms + Chinese character, bigram, and trigram tokens
 - synonym expansion for common safety and optics terms
 - section-aware chunking for headings such as `[SAF-PPE]`, `[SAF-SOP]`, `[OPT-MIRROR]`
 - section metadata persisted on chunks
 - lightweight domain boost for safety-related vs optics-related queries
+
+Production-oriented retrieval options are also wired:
+
+- `sql_json`: local fallback over JSON embeddings and lexical scoring
+- `chroma`: dense vector retrieval with persisted local Chroma collections
+- `pgvector`: PostgreSQL/pgvector retrieval with SQL metadata remaining authoritative
+- optional `sentence_transformers` cross-encoder reranker over bounded candidates
+
+Operational setup and acceptance checks are documented in [docs/RAG_OPERATIONS.md](docs/RAG_OPERATIONS.md).
 
 Current synthetic evaluation documents:
 
@@ -132,7 +144,7 @@ The old MockProvider / demo knowledge benchmark is deprecated. The current bench
 | Tool routing instructions | 80 |
 | Structured artifact generations | 20 |
 | End-to-end Agent tasks | 10 |
-| Backend tests | 120 passed |
+| Backend tests | 161 passed, 2 skipped |
 
 | Metric | Result |
 |---|---:|
@@ -151,7 +163,7 @@ Known benchmark limitations:
 
 - The safety manual is currently indexed as TXT, not as a PDF source.
 - Evaluation is based on synthetic documents, not real laboratory data.
-- Negative query rejection dropped from 100.00% to 83.33% after stronger recall; score thresholds and abstention logic are still needed.
+- Negative query rejection on the older synthetic benchmark was 83.33% after stronger recall; current abstention logic now includes configurable score and margin thresholds and should be re-measured on a held-out authorized dataset.
 - Token usage and cost are not exposed by the current provider wrapper.
 - The local lexical retriever is not a replacement for production embeddings or reranking.
 
@@ -205,6 +217,15 @@ Stop:
 docker compose down
 ```
 
+Optional local dense embeddings or cross-encoder reranking:
+
+```powershell
+cd backend
+py -m pip install -r requirements-ml.txt
+```
+
+Deployment and release-gate details are documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The current acceptance matrix is tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
+
 ## Environment Variables
 
 Create `.env` for local provider and runtime configuration. Do not commit real API keys.
@@ -228,6 +249,8 @@ AUTO_CREATE_TABLES=true
 EMBEDDING_PROVIDER=local
 RETRIEVAL_BACKEND=sql_json
 VECTOR_STORE_DIR=./vector_store
+PGVECTOR_DIMENSION=384
+RERANKER_PROVIDER=none
 
 REQUIRE_AUTH=false
 API_KEY=
@@ -263,6 +286,15 @@ Reports are generated locally and are not tracked in Git:
 docs/benchmarks/
 ```
 
+Authorized private-document evals use JSONL files under `docs/evals/private/` and are ignored by Git:
+
+```powershell
+cd backend
+py scripts\index_authorized_docs.py
+py scripts\eval_authorized_rag.py --dataset ..\docs\evals\private\rag_eval_authorized_holdout.jsonl --top-k 5 --min-positive-hit-rate 0.85 --min-negative-rejection-rate 0.90
+py scripts\tune_retrieval_thresholds.py --dataset ..\docs\evals\private\rag_eval_authorized.jsonl --top-k 5
+```
+
 ## Tests
 
 ```powershell
@@ -270,10 +302,24 @@ cd backend
 py -m pytest tests -q
 ```
 
+One-command local acceptance check:
+
+```powershell
+cd backend
+py scripts\acceptance_check.py
+```
+
+Final release audit after hosted CI and private eval evidence are available:
+
+```powershell
+cd backend
+py scripts\final_acceptance_audit.py
+```
+
 Current local result:
 
 ```text
-127 passed
+161 passed, 2 skipped
 ```
 
 Frontend build:
@@ -309,6 +355,11 @@ Core endpoints:
 - `POST /api/versioning/prompts`
 - `POST /api/versioning/workflows`
 - `POST /api/evals/rag`
+- `POST /api/evals/rag/private-dataset`
+- `POST /api/cases/{case_id}/modules`
+- `POST /api/cases/modules/{module_id}/run`
+- `GET /api/cases/{case_id}/components`
+- `GET /api/cases/{case_id}/components/procurement.csv`
 
 ## Important Tables
 
@@ -341,7 +392,8 @@ LaserClaw/
 |   |-- app/
 |   |   |-- agent/          # context, routing, planner, orchestrator, tools
 |   |   |-- api/            # FastAPI routes
-|   |   |-- auth/           # API-key auth and coarse roles
+|   |   |-- auth/           # API-key auth, roles, and project-level ACL
+|   |   |-- evals/          # JSONL dataset loading and retrieval metrics
 |   |   |-- knowledge/      # ingestion, chunking, embeddings, retrieval
 |   |   |-- models/         # SQLAlchemy models
 |   |   |-- observability/  # audit and usage accounting
@@ -367,10 +419,10 @@ LaserClaw/
 
 ## Current Limitations
 
-- Project/user/group models exist, but fine-grained endpoint authorization still needs hardening.
-- Large-corpus retrieval should use a vector backend before claiming production-scale latency.
-- Long chat sessions use a recent-message window; automatic long-term memory summarization is not implemented yet.
-- Benchmarks use synthetic evaluation documents unless replaced with permissioned real lab documents.
+- pgvector and Chroma paths are implemented, but production-scale claims require running the documented integration checks with the target deployment configuration.
+- Cross-encoder reranking is available but disabled by default because it adds latency and model dependencies.
+- Benchmarks use synthetic evaluation documents unless replaced with permissioned real lab documents through the private eval workflow.
+- CI is defined in GitHub Actions, but remote CI status depends on running it in the hosted repository.
 - Generated content is advisory and must not be treated as authoritative safety or operating instructions.
 
 ## License

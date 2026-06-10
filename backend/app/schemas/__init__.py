@@ -94,6 +94,97 @@ class GenerateRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
 
 
+class CaseModuleCreate(BaseModel):
+    module_type: str = Field(..., pattern="^(stability|beam_profile|spectrum|components)$")
+    title: Optional[str] = None
+    config_json: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CaseModuleUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    status: Optional[str] = Field(None, pattern="^(draft|ready|running|completed|failed)$")
+    config_json: Optional[Dict[str, Any]] = None
+    result_json: Optional[Dict[str, Any]] = None
+
+
+class CaseModuleFileResponse(BaseModel):
+    id: int
+    module_id: int
+    filename: str
+    file_type: Optional[str] = None
+    file_role: str = "input"
+    content_hash: Optional[str] = None
+    metadata_json: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CaseModuleResponse(BaseModel):
+    id: int
+    case_id: int
+    module_type: str
+    title: str
+    status: str
+    config_json: Dict[str, Any] = Field(default_factory=dict)
+    result_json: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    files: List[CaseModuleFileResponse] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ModuleRunRequest(BaseModel):
+    config_json: Dict[str, Any] = Field(default_factory=dict)
+    save_generated_content: bool = True
+
+
+class CaseComponentItemBase(BaseModel):
+    category: str = "component"
+    name: str = Field(..., min_length=1, max_length=255)
+    specification: Optional[str] = None
+    quantity: float = 1
+    unit: str = "pcs"
+    purpose: Optional[str] = None
+    required: bool = True
+    owned: bool = False
+    procurement_status: str = Field(default="needed", pattern="^(needed|owned|optional|pending|ordered|received)$")
+    vendor: Optional[str] = None
+    part_number: Optional[str] = None
+    notes: Optional[str] = None
+    source: str = "manual"
+
+
+class CaseComponentItemCreate(CaseComponentItemBase):
+    module_id: Optional[int] = None
+
+
+class CaseComponentItemUpdate(BaseModel):
+    category: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    specification: Optional[str] = None
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    purpose: Optional[str] = None
+    required: Optional[bool] = None
+    owned: Optional[bool] = None
+    procurement_status: Optional[str] = Field(None, pattern="^(needed|owned|optional|pending|ordered|received)$")
+    vendor: Optional[str] = None
+    part_number: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class CaseComponentItemResponse(CaseComponentItemBase):
+    id: int
+    case_id: int
+    module_id: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class KnowledgeSourceResponse(BaseModel):
     id: int
     case_id: Optional[int] = None
@@ -147,7 +238,7 @@ class KnowledgeSearchResponse(BaseModel):
 class AgentTaskCreate(BaseModel):
     case_id: Optional[int] = None
     goal: str = Field(..., min_length=1)
-    mode: str = Field(default="troubleshooting", pattern="^(troubleshooting|plan|report|rezonator)$")
+    mode: str = Field(default="troubleshooting", pattern="^(troubleshooting|plan|report|rezonator|stability|beam_profile|spectrum|components|module_management)$")
     require_citations: bool = True
 
 
@@ -155,7 +246,7 @@ class AgentChatRequest(BaseModel):
     session_id: Optional[int] = None
     message: str = Field(..., min_length=1)
     case_id: Optional[int] = None
-    mode: str = Field(default="auto", pattern="^(auto|chat|troubleshooting|plan|report|rezonator)$")
+    mode: str = Field(default="auto", pattern="^(auto|chat|troubleshooting|plan|report|rezonator|stability|beam_profile|spectrum|components|module_management)$")
     require_citations: bool = True
 
 
@@ -354,10 +445,13 @@ class WorkflowVersionResponse(WorkflowVersionCreate):
 
 
 class RagEvalItem(BaseModel):
+    id: Optional[str] = None
     query: str = Field(..., min_length=1)
     expected_source_ids: List[int] = Field(default_factory=list)
+    expected_source_title_contains: Optional[str] = None
     expected_terms: List[str] = Field(default_factory=list)
     case_id: Optional[int] = None
+    should_answer: bool = True
 
 
 class RagEvalRequest(BaseModel):
@@ -370,7 +464,7 @@ class RagEvalRunResponse(BaseModel):
     id: int
     name: str
     dataset: List[Dict[str, Any]]
-    results: List[Dict[str, Any]]
+    results: Any
     total_questions: int
     hit_rate: float
     mean_max_score: float

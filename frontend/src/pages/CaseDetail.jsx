@@ -18,6 +18,7 @@ function CaseDetail() {
     ['rezonator', t('caseDetail.tabs.rezonator')],
     ['report', t('caseDetail.tabs.report')],
     ['knowledge', t('caseDetail.tabs.knowledge')],
+    ['modules', t('caseDetail.tabs.modules')],
     ['agent', t('caseDetail.tabs.agent')],
     ['attachments', t('caseDetail.tabs.attachments')],
   ];
@@ -27,6 +28,8 @@ function CaseDetail() {
   const [generatedContents, setGeneratedContents] = useState({});
   const [attachments, setAttachments] = useState([]);
   const [sources, setSources] = useState([]);
+  const [modules, setModules] = useState([]);
+  const [components, setComponents] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
@@ -38,6 +41,9 @@ function CaseDetail() {
   const [agentMode, setAgentMode] = useState('troubleshooting');
   const [agentRunning, setAgentRunning] = useState(false);
   const [analyzingAttachment, setAnalyzingAttachment] = useState(null);
+  const [newModuleType, setNewModuleType] = useState('stability');
+  const [moduleRunning, setModuleRunning] = useState(null);
+  const [moduleConfigText, setModuleConfigText] = useState('');
 
   useEffect(() => {
     loadData();
@@ -46,12 +52,14 @@ function CaseDetail() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [caseResult, contentsResult, attachmentsResult, sourcesResult, tasksResult] = await Promise.all([
+      const [caseResult, contentsResult, attachmentsResult, sourcesResult, tasksResult, modulesResult, componentsResult] = await Promise.all([
         casesApi.get(id),
         casesApi.getGeneratedContents(id),
         casesApi.listAttachments(id),
         knowledgeApi.listSources(caseId),
         agentApi.listTasks(caseId),
+        casesApi.listModules(id),
+        casesApi.listComponents(id),
       ]);
 
       const organized = {};
@@ -64,6 +72,8 @@ function CaseDetail() {
       setGeneratedContents(organized);
       setAttachments(attachmentsResult);
       setSources(sourcesResult);
+      setModules(modulesResult);
+      setComponents(componentsResult);
       setTasks(tasksResult);
       setError(null);
     } catch (err) {
@@ -141,6 +151,51 @@ function CaseDetail() {
     }
   };
 
+  const handleCreateModule = async () => {
+    await casesApi.createModule(id, { module_type: newModuleType });
+    await loadData();
+    setActiveTab('modules');
+  };
+
+  const handleModuleUpload = async (moduleId, event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    try {
+      await casesApi.uploadModuleFile(moduleId, file);
+      event.target.value = '';
+      await loadData();
+    } catch (err) {
+      alert(t('caseDetail.modulesTab.uploadFailed') + err.message);
+    }
+  };
+
+  const handleRunModule = async (module) => {
+    let config = {};
+    if (moduleConfigText.trim()) {
+      try {
+        config = JSON.parse(moduleConfigText);
+      } catch (err) {
+        alert(t('caseDetail.modulesTab.badConfig'));
+        return;
+      }
+    }
+    setModuleRunning(module.id);
+    try {
+      await casesApi.runModule(module.id, { config_json: config });
+      setModuleConfigText('');
+      await loadData();
+    } catch (err) {
+      alert(t('caseDetail.modulesTab.runFailed') + err.message);
+    } finally {
+      setModuleRunning(null);
+    }
+  };
+
+  const handleToggleOwned = async (item) => {
+    await casesApi.updateComponent(item.id, { owned: !item.owned });
+    await loadData();
+  };
+
   const isImageAttachment = (attachment) => {
     const type = attachment.file_type || '';
     const name = attachment.filename || '';
@@ -176,6 +231,103 @@ function CaseDetail() {
       </section>
     );
   };
+
+  const moduleLabel = (type) => {
+    const labels = {
+      stability: t('caseDetail.modulesTab.stability'),
+      beam_profile: t('caseDetail.modulesTab.beamProfile'),
+      spectrum: t('caseDetail.modulesTab.spectrum'),
+      components: t('caseDetail.modulesTab.components'),
+    };
+    return labels[type] || type;
+  };
+
+  const renderModules = () => (
+    <div>
+      <div className="card">
+        <h2 className="card-title">{t('caseDetail.modulesTab.addTitle')}</h2>
+        <div className="input-row">
+          <select value={newModuleType} onChange={(event) => setNewModuleType(event.target.value)}>
+            <option value="stability">{t('caseDetail.modulesTab.stability')}</option>
+            <option value="beam_profile">{t('caseDetail.modulesTab.beamProfile')}</option>
+            <option value="spectrum">{t('caseDetail.modulesTab.spectrum')}</option>
+            <option value="components">{t('caseDetail.modulesTab.components')}</option>
+          </select>
+          <button className="btn btn-primary" onClick={handleCreateModule}>{t('common.add')}</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2 className="card-title">{t('caseDetail.modulesTab.runConfig')}</h2>
+        <textarea
+          value={moduleConfigText}
+          onChange={(event) => setModuleConfigText(event.target.value)}
+          rows={4}
+          placeholder='{"roi":[120,300,500,180],"valid_min":90,"valid_max":130,"ylabel":"Power"}'
+        />
+        <p className="muted">{t('caseDetail.modulesTab.configHint')}</p>
+      </div>
+
+      {modules.length === 0 && <div className="card"><p>{t('caseDetail.modulesTab.empty')}</p></div>}
+      {modules.map((module) => (
+        <article key={module.id} className="card">
+          <div className="generated-card-title">
+            <div>
+              <h2 className="card-title">{module.title}</h2>
+              <span className="meta-pill">{moduleLabel(module.module_type)}</span>
+              <span className="meta-pill">{module.status}</span>
+            </div>
+            <div className="action-row">
+              <input type="file" onChange={(event) => handleModuleUpload(module.id, event)} />
+              <button className="btn btn-primary" disabled={moduleRunning === module.id} onClick={() => handleRunModule(module)}>
+                {moduleRunning === module.id ? t('caseDetail.modulesTab.running') : t('caseDetail.modulesTab.run')}
+              </button>
+            </div>
+          </div>
+
+          {module.files.length > 0 && (
+            <div className="generated-section">
+              <h3>{t('caseDetail.modulesTab.files')}</h3>
+              {module.files.map((file) => (
+                <div key={file.id} className="source-row">
+                  <span>{file.filename}</span>
+                  <div className="action-row">
+                    <span className="meta-pill">{file.file_role}</span>
+                    <a className="btn btn-secondary" href={casesApi.moduleFileUrl(file.id)} target="_blank" rel="noreferrer">{t('common.download')}</a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {module.module_type === 'components' && (
+            <div className="generated-section">
+              <div className="generated-card-title">
+                <h3>{t('caseDetail.modulesTab.componentList')}</h3>
+                <a className="btn btn-secondary" href={casesApi.procurementUrl(id)} target="_blank" rel="noreferrer">{t('caseDetail.modulesTab.exportProcurement')}</a>
+              </div>
+              {components.length === 0 ? <p>{t('caseDetail.modulesTab.noComponents')}</p> : components.map((item) => (
+                <div key={item.id} className="source-row">
+                  <div>
+                    <strong>{item.name}</strong>
+                    <p className="muted">{item.category} · {item.specification || '-'} · {item.quantity} {item.unit}</p>
+                  </div>
+                  <div className="action-row">
+                    <span className="meta-pill">{item.procurement_status}</span>
+                    <button className="btn btn-secondary" onClick={() => handleToggleOwned(item)}>
+                      {item.owned ? t('caseDetail.modulesTab.owned') : t('caseDetail.modulesTab.markOwned')}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {renderJson(module.result_json || {})}
+        </article>
+      ))}
+    </div>
+  );
 
   const renderGenerated = (type) => {
     const item = latest(type);
@@ -289,6 +441,8 @@ function CaseDetail() {
           )}
         </div>
       )}
+
+      {activeTab === 'modules' && renderModules()}
 
       {activeTab === 'agent' && (
         <div>
