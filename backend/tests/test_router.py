@@ -1,7 +1,6 @@
 """Tests for the tool router — 50+ routing test cases."""
 from __future__ import annotations
 
-import pytest
 
 from app.agent.router import (
     TOOL_CHAT,

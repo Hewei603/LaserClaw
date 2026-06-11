@@ -4,15 +4,8 @@ import { useLanguage } from '../LanguageContext';
 
 const ACCEPTED_TYPES = '.pdf,.txt,.md,.csv,.json,.log';
 
-function formatBytes(bytes) {
-  if (!bytes) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function formatDate(iso) {
-  if (!iso) return '—';
+  if (!iso) return '-';
   return new Date(iso).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' });
 }
 
@@ -32,7 +25,7 @@ export default function LabDocuments() {
   const loadSources = async () => {
     try {
       const data = await knowledgeApi.listSources();
-      setSources(data.filter((s) => !s.case_id));
+      setSources(data.filter((source) => !source.case_id));
     } catch (err) {
       setUploadError(err.message);
     }
@@ -55,12 +48,12 @@ export default function LabDocuments() {
     await loadSources();
   };
 
-  const handleFileInput = (e) => handleFiles(e.target.files);
+  const handleFileInput = (event) => handleFiles(event.target.files);
 
-  const handleDrop = (e) => {
-    e.preventDefault();
+  const handleDrop = (event) => {
+    event.preventDefault();
     setDragOver(false);
-    handleFiles(e.dataTransfer.files);
+    handleFiles(event.dataTransfer.files);
   };
 
   const handleDelete = async (source) => {
@@ -68,7 +61,7 @@ export default function LabDocuments() {
     setDeletingId(source.id);
     try {
       await knowledgeApi.deleteSource(source.id);
-      setSources((prev) => prev.filter((s) => s.id !== source.id));
+      setSources((prev) => prev.filter((item) => item.id !== source.id));
     } catch (err) {
       setUploadError(err.response?.data?.detail || err.message);
     } finally {
@@ -85,21 +78,28 @@ export default function LabDocuments() {
 
       <div
         className={`lab-docs-dropzone${dragOver ? ' dragover' : ''}`}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && fileInputRef.current?.click()}
+        onKeyDown={(event) => event.key === 'Enter' && fileInputRef.current?.click()}
         aria-label={t('labDocsPage.dropzone')}
       >
-        <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES} multiple style={{ display: 'none' }} onChange={handleFileInput} />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPTED_TYPES}
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFileInput}
+        />
         {uploading ? (
           <span className="lab-docs-uploading">{t('labDocsPage.uploading')}</span>
         ) : (
           <>
-            <span className="lab-docs-dropzone-icon">📄</span>
+            <span className="lab-docs-dropzone-icon">+</span>
             <span className="lab-docs-dropzone-text">{t('labDocsPage.dropzone')}</span>
             <span className="lab-docs-dropzone-hint">{t('labDocsPage.dropzoneHint')}</span>
           </>
@@ -139,7 +139,7 @@ export default function LabDocuments() {
                 <td>
                   <span className="lab-docs-badge">{source.source_type}</span>
                 </td>
-                <td>{source.chunk_count ?? '—'}</td>
+                <td>{source.chunk_count ?? '-'}</td>
                 <td>{formatDate(source.created_at)}</td>
                 <td>
                   <button
@@ -148,7 +148,7 @@ export default function LabDocuments() {
                     disabled={deletingId === source.id}
                     aria-label={`${t('common.delete')} ${source.title}`}
                   >
-                    {deletingId === source.id ? t('common.delete') + '...' : t('common.delete')}
+                    {deletingId === source.id ? `${t('common.delete')}...` : t('common.delete')}
                   </button>
                 </td>
               </tr>

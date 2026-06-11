@@ -7,9 +7,14 @@ This file tracks the concrete evidence required before LaserClaw can be called e
 | Gate | Command / Evidence | Current Status |
 |---|---|---|
 | Backend regression tests | `cd backend; py -m pytest tests -q` | Passed: `161 passed, 2 skipped` |
+| Backend lint | `py -m ruff check backend` | Passed |
+| Frontend lint | `cd frontend; npm run lint` | Passed |
 | Frontend production build | `cd frontend; npm run build` | Passed |
 | SQLite migration from empty DB | `DATABASE_URL=sqlite:///./_tmp_migration_check.db py -m alembic upgrade head` | Passed |
 | Script syntax | `py -m py_compile backend/scripts/*.py` for eval/import scripts | Passed |
+| API auth dependency audit | `cd backend; py scripts\audit_endpoint_acl.py --fail-on-findings` | Passed: all `/api/*` routes require a principal dependency |
+| Synthetic retrieval backend benchmark | `cd backend; py scripts\benchmark_retrieval_backends.py --backends sql_json,chroma --repeats 10 --top-k 5` | Available; produces `docs/benchmarks/latest_retrieval_backends.json` |
+| Synthetic generation latency benchmark | `cd backend; py scripts\benchmark_generation_latency.py --repeats 3` | Available; produces `docs/benchmarks/latest_generation_latency.json` |
 | Chroma dense retrieval path | `tests/test_vector_store_chroma.py::test_chroma_backend_retrieves_dense_embeddings` | Passed with deterministic dense embedding |
 | Reranker enabled path | `tests/test_reranking.py::test_sentence_transformers_reranker_reorders_with_fake_model` | Passed with deterministic cross-encoder stub |
 | ACL/RAG leakage tests | `tests/test_acl.py` | Passed |
@@ -39,9 +44,26 @@ cd backend
 py scripts\acceptance_check.py
 ```
 
-This runs backend tests, SQLite migrations, eval/import script syntax checks, and the frontend build.
+This runs backend lint, backend tests, SQLite migrations, eval/import/benchmark script syntax checks, API auth dependency audit, frontend lint, and the frontend build.
 It also validates the public synthetic eval JSONL example.
-CI also runs the backend acceptance extras with `--skip-tests --skip-frontend` so script syntax, SQLite migrations, and public eval JSONL validation are covered remotely.
+CI also runs the backend acceptance extras with `--skip-tests --skip-frontend` so script syntax, SQLite migrations, endpoint auth audit, and public eval JSONL validation are covered remotely.
+
+## V1.0 Performance Evidence Commands
+
+These commands produce reproducible synthetic reports. They are release evidence for benchmark wiring and regressions, not proof of performance on private lab corpora.
+
+```powershell
+cd backend
+py scripts\benchmark_retrieval_backends.py --backends sql_json,chroma --repeats 10 --top-k 5
+py scripts\benchmark_generation_latency.py --repeats 3
+```
+
+For `pgvector`, run the retrieval benchmark in an environment where `DATABASE_URL` points at PostgreSQL with pgvector enabled:
+
+```powershell
+cd backend
+py scripts\benchmark_retrieval_backends.py --backends pgvector --repeats 10 --top-k 5
+```
 
 ## Final Audit Command
 

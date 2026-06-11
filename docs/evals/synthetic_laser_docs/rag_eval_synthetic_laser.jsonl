@@ -1,0 +1,7 @@
+{"id":"safety-ppe-1064","query":"What OD eyewear is required for 1030-1100 nm Class 4 alignment?","expected_title":"Synthetic Laser Safety SOP","expected_terms":["OD >= 5","IR-1064-OD5"]}
+{"id":"safety-auth-watcher","query":"High-power Class 4 operation requires what authorization and watcher conditions?","expected_title":"Synthetic Laser Safety SOP","expected_terms":["L3 authorization","Watcher"]}
+{"id":"safety-eye-exposure","query":"疑似眼照射后第一步和就医时间要求是什么？","expected_title":"Synthetic Laser Safety SOP","expected_terms":["急停","15 分钟"]}
+{"id":"optics-output-coupler","query":"Which 1064 nm output coupler has T=5 and ROC=100?","expected_title":"Synthetic Optics Components Catalog","expected_terms":["MIR-OC1064-T05","ROC=100"]}
+{"id":"optics-lbo-no-output","query":"LBO 无 532 nm 输出时优先检查哪些因素？","expected_title":"Synthetic Optics Components Catalog","expected_terms":["基频功率","偏振","LBO 角度","温度"]}
+{"id":"optics-spectrum-532","query":"What filter and spectrometer should be used for 532 nm spectrum measurement?","expected_title":"Synthetic Optics Components Catalog","expected_terms":["FLT-BP-532","SPEC-USB"]}
+{"id":"case-low-power","query":"What low-risk checks help diagnose low output power after realignment?","expected_title":"Synthetic Troubleshooting Case Notes","expected_terms":["cleaning inspection","pump spot position","mirror angle rollback"]}

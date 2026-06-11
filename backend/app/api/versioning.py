@@ -42,7 +42,13 @@ async def create_prompt_version(
 
 
 @router.get("/prompts", response_model=list[PromptVersionResponse])
-async def list_prompt_versions(name: str | None = None, active: bool | None = None, db: Session = Depends(get_db)):
+async def list_prompt_versions(
+    name: str | None = None,
+    active: bool | None = None,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    _ = principal
     query = db.query(PromptVersion)
     if name:
         query = query.filter(PromptVersion.name == name)
@@ -89,7 +95,13 @@ async def create_workflow_version(
 
 
 @router.get("/workflows", response_model=list[WorkflowVersionResponse])
-async def list_workflow_versions(name: str | None = None, active: bool | None = None, db: Session = Depends(get_db)):
+async def list_workflow_versions(
+    name: str | None = None,
+    active: bool | None = None,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    _ = principal
     query = db.query(WorkflowVersion)
     if name:
         query = query.filter(WorkflowVersion.name == name)

@@ -44,7 +44,7 @@ async def request_id_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     try:
         response = await call_next(request)
-    except Exception as exc:
+    except Exception:
         logger.exception("Unhandled API error", extra={"request_id": request_id})
         return JSONResponse(status_code=500, content={"detail": "Internal server error", "request_id": request_id})
     response.headers["x-request-id"] = request_id

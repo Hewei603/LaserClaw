@@ -1,7 +1,6 @@
 """
 实验案例API测试
 """
-import pytest
 
 
 def test_create_case(client):

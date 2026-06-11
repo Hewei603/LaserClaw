@@ -26,8 +26,12 @@ def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run local LaserClaw acceptance checks.")
     parser.add_argument("--skip-frontend", action="store_true")
+    parser.add_argument("--skip-lint", action="store_true")
     parser.add_argument("--skip-tests", action="store_true")
     args = parser.parse_args()
+
+    if not args.skip_lint:
+        run([sys.executable, "-m", "ruff", "check", "backend"], cwd=ROOT)
 
     if not args.skip_tests:
         run([sys.executable, "-m", "pytest", "tests", "-q"], cwd=BACKEND)
@@ -54,6 +58,18 @@ def main() -> None:
             "scripts/eval_authorized_rag.py",
             "scripts/tune_retrieval_thresholds.py",
             "scripts/final_acceptance_audit.py",
+            "scripts/audit_endpoint_acl.py",
+            "scripts/benchmark_retrieval_backends.py",
+            "scripts/benchmark_generation_latency.py",
+        ],
+        cwd=BACKEND,
+    )
+
+    run(
+        [
+            sys.executable,
+            "scripts/audit_endpoint_acl.py",
+            "--fail-on-findings",
         ],
         cwd=BACKEND,
     )
@@ -72,6 +88,8 @@ def main() -> None:
     )
 
     if not args.skip_frontend:
+        if not args.skip_lint:
+            run(["npm", "run", "lint"], cwd=FRONTEND)
         run(["npm", "run", "build"], cwd=FRONTEND)
 
     print("\nLocal acceptance checks passed.")

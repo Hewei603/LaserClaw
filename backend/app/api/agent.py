@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from ..agent.context import build_chat_context
 from ..agent.memory import maybe_summarize_session
 from ..agent.orchestrator import create_and_run_task
-from ..agent.tools import tool_schemas
 from ..auth.acl import accessible_case_ids, assert_case_edit, assert_case_view
 from ..auth.security import Principal, get_current_principal
 from ..database import get_db
@@ -372,7 +371,7 @@ async def cancel_task(
     """Cancel a task that has not completed."""
     task = await get_task(task_id, db, principal)
     if task.case_id is not None:
-        case = _get_case(task.case_id, db, principal, write=True)
+        _get_case(task.case_id, db, principal, write=True)
     if task.status not in {"completed", "failed", "cancelled"}:
         task.status = "cancelled"
         db.commit()

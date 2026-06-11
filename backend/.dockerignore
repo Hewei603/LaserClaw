@@ -1,0 +1,16 @@
+.venv
+venv
+__pycache__
+.pytest_cache
+*.pyc
+*.pyo
+*.db
+*.sqlite
+uploads/*
+!uploads/.gitkeep
+vector_store
+data
+htmlcov
+.coverage
+tests/__pycache__
+scripts/__pycache__
