@@ -1,5 +1,4 @@
 """Tests for long-conversation summary and memory management."""
-import pytest
 
 
 # ---------------------------------------------------------------------------

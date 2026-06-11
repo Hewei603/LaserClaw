@@ -174,7 +174,7 @@ function CaseDetail() {
     if (moduleConfigText.trim()) {
       try {
         config = JSON.parse(moduleConfigText);
-      } catch (err) {
+      } catch {
         alert(t('caseDetail.modulesTab.badConfig'));
         return;
       }

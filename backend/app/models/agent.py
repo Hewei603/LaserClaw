@@ -1,5 +1,5 @@
 """Agent task and chat models."""
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 

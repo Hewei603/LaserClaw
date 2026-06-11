@@ -106,5 +106,10 @@ async def run_private_rag_eval(
 
 
 @router.get("/rag", response_model=list[RagEvalRunResponse])
-async def list_rag_evals(limit: int = 50, db: Session = Depends(get_db)):
+async def list_rag_evals(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    _ = principal
     return db.query(RagEvalRun).order_by(RagEvalRun.created_at.desc()).limit(limit).all()

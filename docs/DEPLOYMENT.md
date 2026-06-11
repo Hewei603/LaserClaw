@@ -6,25 +6,36 @@ This guide defines the operational checks for a production-oriented LaserClaw de
 
 ```powershell
 cd backend
-py -m pip install -r requirements.txt
+py -m pip install -r requirements-dev.txt
+cd ..
+py -m ruff check backend
+cd backend
 py -m pytest tests -q
+py scripts\audit_endpoint_acl.py --fail-on-findings
+py scripts\benchmark_retrieval_backends.py --backends sql_json,chroma --repeats 10 --top-k 5
+py scripts\benchmark_generation_latency.py --repeats 3
 
 cd ..\frontend
 npm ci
+npm run lint
 npm run build
 ```
 
 Acceptance:
 
 - Backend tests pass.
+- API auth dependency audit reports zero findings.
+- Synthetic retrieval and generation benchmark reports are produced.
 - Frontend build completes.
 - No real API keys or private documents are required.
 
 ## Docker Compose
 
 Docker Desktop or another Docker daemon must be running before this check.
-The frontend image uses Node 22 because the current Vite version requires Node 20.19+ or 22.12+.
+The default Compose file is production-oriented: the backend runs without hot reload, and the frontend is built as static assets served by nginx.
+The frontend build stage uses Node 22 because the current Vite version requires Node 20.19+ or 22.12+.
 The backend base image installs `requirements.txt`; install `requirements-ml.txt` only for deployments that need local sentence-transformers models.
+Compose uses `DOCKER_VECTOR_STORE_DIR` for the container path and defaults it to `/app/vector_store`, so local `VECTOR_STORE_DIR` values do not leak into the container filesystem layout.
 
 ```powershell
 docker compose up -d --build
@@ -48,6 +59,13 @@ Stop:
 
 ```powershell
 docker compose down
+```
+
+For bind-mounted development with hot reload:
+
+```powershell
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml down
 ```
 
 ## Authentication
@@ -74,6 +92,8 @@ X-User-Role: user|reviewer|admin
 ```
 
 Project-level ACL is enforced for cases, knowledge search, attachments, generated content, Agent tasks, case modules, and bundle export.
+
+The built-in API-key mode is suitable for local and small trusted deployments. For shared production deployments, put LaserClaw behind a proper identity provider or reverse proxy that issues trusted user context server-side.
 
 ## Data Locations
 
@@ -105,6 +125,8 @@ A release candidate should pass:
 ```powershell
 cd backend
 py scripts\acceptance_check.py
+py scripts\benchmark_retrieval_backends.py --backends sql_json,chroma --repeats 10 --top-k 5
+py scripts\benchmark_generation_latency.py --repeats 3
 ```
 
 For production retrieval claims, also run the relevant vector backend checks in `docs/RAG_OPERATIONS.md`.

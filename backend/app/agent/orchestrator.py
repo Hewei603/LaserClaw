@@ -20,7 +20,6 @@ from .tools import (
     generate_component_items_payload,
     list_attachments_payload,
     list_case_modules_payload,
-    list_component_items_payload,
     list_generated_contents_payload,
     record_tool_call,
     save_generated_content_payload,

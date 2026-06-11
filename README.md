@@ -1,11 +1,10 @@
 # LaserClaw
 
-LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows**. It combines experiment case management, global lab knowledge indexing, case-specific evidence retrieval, structured AI artifact generation, persistent Agent traces, and collaboration-oriented governance.
-
-<img width="2534" height="1343" alt="image" src="https://github.com/user-attachments/assets/b8ebb7f4-f980-4671-8722-2ef0913f7f70" />
-
+LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows**. It combines experiment case management, lab knowledge indexing, case-specific evidence retrieval, structured AI artifact generation, persistent Agent traces, and collaboration-oriented governance.
 
 > Safety note: LaserClaw does not control lasers, power supplies, translation stages, interlocks, optical tables, detectors, or any other lab hardware. Generated content is advisory draft material and must be reviewed by qualified personnel.
+
+![LaserClaw screenshot](https://github.com/user-attachments/assets/b8ebb7f4-f980-4671-8722-2ef0913f7f70)
 
 ## What It Solves
 
@@ -18,21 +17,19 @@ LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows*
 
 ## Core Features
 
-- **Case-aware Agent chat**: persistent chat sessions with recent conversation history, linked case data, retrieved knowledge, citations, and retrieval confidence.
-- **Two-tier RAG**: global lab documents are treated as lab-wide authority; case-specific attachments and generated artifacts provide local experimental context.
-- **Global knowledge base**: upload shared PDFs, TXT, Markdown, CSV, JSON, TSV, or log files for all cases.
-- **Case schema v2**: project ownership, status, visibility, tags, measurements, safety notes, conclusions, owner, and schema version.
-- **Knowledge governance**: source status (`draft`, `approved`, `deprecated`, `archived`), version, owner, reviewer, review time, and reindexing.
-- **Tool-calling Agent workflow**: routes user intent to chat, plan, troubleshooting, report, or ReZonator draft; persists tasks, steps, and tool calls.
-- **Structured AI artifacts**: saves plan, troubleshooting, report, image analysis, and resonator outputs as versioned generated content.
-- **Prompt/workflow versioning**: manage active prompt and workflow versions for reproducible AI runs.
-- **Case bundle export**: export a complete case archive with manifest, attachments, generated content, and knowledge metadata.
-- **RAG evals and benchmarks**: reproducible scripts and API for retrieval accuracy, latency, indexing throughput, and LLM JSON reliability.
-- **Production retrieval options**: deterministic `sql_json`, Chroma dense retrieval, pgvector retrieval, and optional cross-encoder reranking.
-- **Project-level ACL**: case, knowledge search, attachments, generation, Agent tasks, case modules, and bundle export follow case/project permissions.
-- **Conversation memory**: rolling summaries and durable memory items augment long chat sessions while keeping RAG citations authoritative.
-- **Provider support**: MockProvider, OpenAI-compatible Chat Completions, and Anthropic.
-- **Bilingual UI**: English / Chinese frontend language switching.
+- **Case-aware Agent chat** with persistent sessions, linked case data, citations, retrieval confidence, and recent conversation context.
+- **Two-tier RAG** over global lab knowledge plus case-specific attachments and generated artifacts.
+- **Global knowledge base** for PDFs, TXT, Markdown, CSV, JSON, TSV, and log files.
+- **Knowledge governance** with source status, version, owner, reviewer, review time, and reindexing.
+- **Tool-calling Agent workflow** for chat, experiment plans, troubleshooting, reports, and ReZonator drafts.
+- **Structured AI artifacts** saved as versioned generated content.
+- **Prompt/workflow versioning** for reproducible AI runs.
+- **Case bundle export** with manifest, attachments, generated content, and knowledge metadata.
+- **Project-level ACL** across cases, knowledge search, attachments, generation, Agent tasks, case modules, and bundle export.
+- **RAG evals and benchmarks** for retrieval quality, latency, indexing throughput, and JSON reliability.
+- **Retrieval backends** including deterministic `sql_json`, Chroma, pgvector, and optional cross-encoder reranking.
+- **Provider support** for MockProvider, OpenAI-compatible Chat Completions, and Anthropic.
+- **Bilingual UI** with English and Chinese language switching.
 
 ## Architecture
 
@@ -40,8 +37,8 @@ LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows*
 React + Vite frontend
   -> FastAPI backend
       -> Case / attachment / knowledge / generation / agent / collaboration APIs
-      -> SQLAlchemy models
-      -> SQLite locally or PostgreSQL in Docker
+      -> SQLAlchemy models and Alembic migrations
+      -> SQLite locally or PostgreSQL/pgvector in Docker
       -> File uploads and global knowledge documents
       -> RAG ingestion, chunking, embeddings, retrieval, citations
       -> OpenAI / Anthropic / Mock provider
@@ -51,7 +48,7 @@ React + Vite frontend
 ## RAG Workflow
 
 ```text
-Global PDF / case attachment / generated artifact
+Global document / case attachment / generated artifact
   -> text extraction
   -> chunking
   -> embedding
@@ -63,10 +60,10 @@ Global PDF / case attachment / generated artifact
 
 LaserClaw uses two retrieval tiers:
 
-1. **Global lab knowledge**: safety manuals, SOPs, optical component catalogs, and lab-wide operating rules. These are searched for every case and take precedence when they conflict with case-local data.
+1. **Global lab knowledge**: safety manuals, SOPs, optical component catalogs, and lab-wide operating rules.
 2. **Case knowledge**: case data, attachments, image analysis, prior reports, and generated artifacts linked to the current case.
 
-<img width="2533" height="1339" alt="aaf64e0dd186049c62032c55c618898b" src="https://github.com/user-attachments/assets/ffc09e0d-93a4-4259-a07b-c943fbbf4cf9" />
+![LaserClaw RAG screenshot](https://github.com/user-attachments/assets/ffc09e0d-93a4-4259-a07b-c943fbbf4cf9)
 
 ## Agent Workflow
 
@@ -75,44 +72,24 @@ User message
   -> create/find chat session
   -> save user message
   -> route intent
-  -> build context:
-       current message
-       recent chat history
-       linked case payload
-       global RAG results
-       case RAG results
-       citations and retrieval confidence
+  -> build context from chat history, case data, RAG results, citations
   -> chat response or saved Agent task
   -> save assistant message / task / artifact / citations
 ```
 
-## Tool Routing
+The chat API can auto-route generation requests, and direct task creation is also available through `POST /api/agent/tasks`. Generation requests create an `AgentTask`, build steps, call tools, retrieve evidence, generate an artifact, save it to the case, and store the trace.
 
-The app supports five intent classes:
+## Retrieval Options
 
-| User intent | Tool / mode |
-|---|---|
-| General chat or QA | `chat` |
-| Generate an experiment plan | `generate_plan` |
-| Generate troubleshooting guidance | `generate_troubleshooting` |
-| Generate an experiment report | `generate_report` |
-| Generate a ReZonator / resonator simulation draft | `generate_resonator_draft` |
+The default stack is deterministic and local:
 
-The chat API can auto-route generation requests, and direct task creation is also available through `POST /api/agent/tasks`.
-
-For ordinary chat, the backend sends a structured context to the provider. For generation requests, it creates an `AgentTask`, builds steps, calls tools, retrieves evidence, generates an artifact, saves it to the case, and stores the full trace.
-
-## RAG and Knowledge Sources
-
-The default RAG stack is deterministic and local. It does not require a vector database:
-
-- tokenization: ASCII terms + Chinese character, bigram, and trigram tokens
+- tokenization: ASCII terms plus Chinese character, bigram, and trigram tokens
 - synonym expansion for common safety and optics terms
 - section-aware chunking for headings such as `[SAF-PPE]`, `[SAF-SOP]`, `[OPT-MIRROR]`
 - section metadata persisted on chunks
-- lightweight domain boost for safety-related vs optics-related queries
+- lightweight domain boosts for safety-related and optics-related queries
 
-Production-oriented retrieval options are also wired:
+Production-oriented retrieval options are wired:
 
 - `sql_json`: local fallback over JSON embeddings and lexical scoring
 - `chroma`: dense vector retrieval with persisted local Chroma collections
@@ -121,30 +98,21 @@ Production-oriented retrieval options are also wired:
 
 Operational setup and acceptance checks are documented in [docs/RAG_OPERATIONS.md](docs/RAG_OPERATIONS.md).
 
-Current synthetic evaluation documents:
+## Current Evaluation Evidence
 
-- `synthetic_optical_components_catalog.pdf`: indexed as a PDF global source
-- `lab_safety_manual.txt`: indexed as a TXT global source
-
-These are **synthetic evaluation documents**. They are not real laboratory policies, operating procedures, equipment procurement data, or safety training material.
-
-<img width="2555" height="1332" alt="image" src="https://github.com/user-attachments/assets/5f01420a-a81c-4e97-a48c-0d7a22e72dd8" />
-
-## Latest Local Benchmark
-
-The old MockProvider / demo knowledge benchmark is deprecated. The current benchmark was run with OpenAIProvider configuration and synthetic evaluation documents.
+The public benchmark uses synthetic documents so the repository can be tested without private lab data. These documents are not real laboratory policies, equipment data, or safety training material.
 
 | Item | Value |
 |---|---|
-| Provider | OpenAIProvider |
-| Model configured | `gpt-5` |
-| Base URL configured | `https://openrouter.ai/api/v1` |
+| Provider used for latest local benchmark | OpenAIProvider |
+| Configured model | `gpt-5` via OpenRouter during that run |
 | RAG retrieval queries | 50 |
-| RAG answer-generation sample | 30 in the prior full eval |
 | Tool routing instructions | 80 |
 | Structured artifact generations | 20 |
 | End-to-end Agent tasks | 10 |
 | Backend tests | 161 passed, 2 skipped |
+| API auth dependency audit | 70 `/api/*` routes checked, 0 findings |
+| Frontend lint/build | Passed |
 
 | Metric | Result |
 |---|---:|
@@ -157,15 +125,18 @@ The old MockProvider / demo knowledge benchmark is deprecated. The current bench
 | End-to-end task success rate | 100.00% |
 | Trace completeness | 100.00% |
 
-RAG optimization improved Top-3 retrieval from 52.27% to 97.73% on the same 50-query synthetic benchmark. A 10-sample RAG answer retest was attempted after the retrieval optimization, but OpenRouter returned `403: This model is not available in your region` for the configured `gpt-5`, so answer-generation retest results are not used as model-quality evidence.
+Additional v1.0 benchmark scripts are available:
+
+- `backend/scripts/benchmark_retrieval_backends.py` compares `sql_json`, Chroma, and pgvector when a pgvector database is configured.
+- `backend/scripts/benchmark_generation_latency.py` measures structured generation latency and output shape by task type.
+- `backend/scripts/audit_endpoint_acl.py` audits FastAPI routes for principal dependency coverage.
 
 Known benchmark limitations:
 
-- The safety manual is currently indexed as TXT, not as a PDF source.
-- Evaluation is based on synthetic documents, not real laboratory data.
-- Negative query rejection on the older synthetic benchmark was 83.33% after stronger recall; current abstention logic now includes configurable score and margin thresholds and should be re-measured on a held-out authorized dataset.
-- Token usage and cost are not exposed by the current provider wrapper.
+- Evaluation is based on synthetic documents unless replaced with authorized private datasets.
 - The local lexical retriever is not a replacement for production embeddings or reranking.
+- Token usage and cost are not exposed by the current provider wrapper.
+- Production retrieval claims should be re-measured against the deployment's target corpus and backend.
 
 ## Quick Start on Windows
 
@@ -199,7 +170,9 @@ npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-## Docker Compose
+## Docker
+
+The default Compose file is production-oriented: the backend runs without reload, and the frontend is built as static assets served by nginx.
 
 ```bash
 docker compose up -d --build
@@ -211,17 +184,17 @@ Services:
 - Backend API: <http://localhost:8000>
 - API docs: <http://localhost:8000/docs>
 
+For bind-mounted development with hot reload:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --build
+```
+
 Stop:
 
 ```bash
 docker compose down
-```
-
-Optional local dense embeddings or cross-encoder reranking:
-
-```powershell
-cd backend
-py -m pip install -r requirements-ml.txt
+docker compose -f docker-compose.dev.yml down
 ```
 
 Deployment and release-gate details are documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The current acceptance matrix is tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
@@ -249,6 +222,7 @@ AUTO_CREATE_TABLES=true
 EMBEDDING_PROVIDER=local
 RETRIEVAL_BACKEND=sql_json
 VECTOR_STORE_DIR=./vector_store
+DOCKER_VECTOR_STORE_DIR=/app/vector_store
 PGVECTOR_DIMENSION=384
 RERANKER_PROVIDER=none
 
@@ -266,40 +240,30 @@ Provider modes:
 
 Use `STRICT_PROVIDER=true` for strict evaluation so missing or unavailable real providers fail clearly instead of falling back to MockProvider.
 
-## Benchmarking
+## Quality Checks
 
-Run the reproducible benchmark:
-
-```powershell
-py backend\scripts\benchmark_resume_metrics.py --repeats 10 --top-k 5
-```
-
-Skip real LLM calls:
-
-```powershell
-py backend\scripts\benchmark_resume_metrics.py --repeats 10 --top-k 5 --skip-llm
-```
-
-Reports are generated locally and are not tracked in Git:
-
-```text
-docs/benchmarks/
-```
-
-Authorized private-document evals use JSONL files under `docs/evals/private/` and are ignored by Git:
-
-```powershell
-cd backend
-py scripts\index_authorized_docs.py
-py scripts\eval_authorized_rag.py --dataset ..\docs\evals\private\rag_eval_authorized_holdout.jsonl --top-k 5 --min-positive-hit-rate 0.85 --min-negative-rejection-rate 0.90
-py scripts\tune_retrieval_thresholds.py --dataset ..\docs\evals\private\rag_eval_authorized.jsonl --top-k 5
-```
-
-## Tests
+Backend tests:
 
 ```powershell
 cd backend
 py -m pytest tests -q
+```
+
+Backend lint:
+
+```powershell
+py -m pip install -r requirements-dev.txt
+cd ..
+py -m ruff check backend
+```
+
+Frontend lint and build:
+
+```powershell
+cd frontend
+npm ci
+npm run lint
+npm run build
 ```
 
 One-command local acceptance check:
@@ -316,17 +280,27 @@ cd backend
 py scripts\final_acceptance_audit.py
 ```
 
-Current local result:
+## Benchmarking
 
-```text
-161 passed, 2 skipped
-```
-
-Frontend build:
+Run the reproducible benchmark:
 
 ```powershell
-cd frontend
-npm run build
+py backend\scripts\benchmark_resume_metrics.py --repeats 10 --top-k 5
+```
+
+Skip real LLM calls:
+
+```powershell
+py backend\scripts\benchmark_resume_metrics.py --repeats 10 --top-k 5 --skip-llm
+```
+
+Authorized private-document evals use JSONL files under `docs/evals/private/`, which are ignored by Git:
+
+```powershell
+cd backend
+py scripts\index_authorized_docs.py
+py scripts\eval_authorized_rag.py --dataset ..\docs\evals\private\rag_eval_authorized_holdout.jsonl --top-k 5 --min-positive-hit-rate 0.85 --min-negative-rejection-rate 0.90
+py scripts\tune_retrieval_thresholds.py --dataset ..\docs\evals\private\rag_eval_authorized.jsonl --top-k 5
 ```
 
 ## API Surface
@@ -361,29 +335,6 @@ Core endpoints:
 - `GET /api/cases/{case_id}/components`
 - `GET /api/cases/{case_id}/components/procurement.csv`
 
-## Important Tables
-
-- `experiment_cases`
-- `attachments`
-- `knowledge_sources`
-- `knowledge_chunks`
-- `retrieval_runs`
-- `retrieval_results`
-- `agent_chat_sessions`
-- `agent_chat_messages`
-- `agent_tasks`
-- `agent_steps`
-- `agent_tool_calls`
-- `generated_contents`
-- `organizations`
-- `users`
-- `groups`
-- `projects`
-- `prompt_versions`
-- `workflow_versions`
-- `rag_eval_runs`
-- `audit_logs`
-
 ## Project Structure
 
 ```text
@@ -402,27 +353,32 @@ LaserClaw/
 |   |-- alembic/
 |   |-- scripts/
 |   |-- tests/
-|   `-- requirements.txt
+|   |-- requirements.txt
+|   `-- requirements-dev.txt
 |-- frontend/
 |   |-- src/
 |   |   |-- api/
 |   |   |-- pages/
 |   |   |-- LanguageContext.jsx
 |   |   `-- i18n.js
+|   |-- Dockerfile
+|   |-- Dockerfile.dev
 |   `-- package.json
 |-- docs/
-|-- Launch-LaserClaw.bat
 |-- docker-compose.yml
+|-- docker-compose.dev.yml
+|-- pyproject.toml
+|-- Launch-LaserClaw.bat
 |-- README.md
 `-- READMEcn.md
 ```
 
 ## Current Limitations
 
+- API-key authentication is suitable for local and small trusted deployments; shared production deployments should integrate a stronger identity provider and server-issued user context.
 - pgvector and Chroma paths are implemented, but production-scale claims require running the documented integration checks with the target deployment configuration.
 - Cross-encoder reranking is available but disabled by default because it adds latency and model dependencies.
 - Benchmarks use synthetic evaluation documents unless replaced with permissioned real lab documents through the private eval workflow.
-- CI is defined in GitHub Actions, but remote CI status depends on running it in the hosted repository.
 - Generated content is advisory and must not be treated as authoritative safety or operating instructions.
 
 ## License

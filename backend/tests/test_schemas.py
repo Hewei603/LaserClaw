@@ -1,7 +1,6 @@
 """Tests for structured output schema validation and repair."""
 from __future__ import annotations
 
-import pytest
 
 from app.agent.schemas import (
     ExperimentPlanSchema,

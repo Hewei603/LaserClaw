@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import json
 import math
 import os
 import shutil
@@ -11,7 +10,6 @@ import statistics
 import subprocess
 import sys
 import uuid
-import zipfile
 from io import StringIO
 from pathlib import Path
 from typing import Any

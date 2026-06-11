@@ -36,6 +36,9 @@ backend/uploads/authorized_lab_docs/*
 
 # Local generated data
 backend/data/knowledge/
+backend/vector_store/
+backend/backend/vector_store/
+vector_store/
 docs/benchmarks/
 docs/evals/private/*
 !docs/evals/private/.gitkeep
