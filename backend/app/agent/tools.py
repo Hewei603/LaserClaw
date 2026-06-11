@@ -7,7 +7,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from ..knowledge.retrieval import results_to_citations, search_case_and_global_knowledge
-from ..models import AgentTask, AgentToolCall, ExperimentCase, GeneratedContent
+from ..models import AgentTask, AgentToolCall, CaseComponentItem, CaseModule, ExperimentCase, GeneratedContent
 
 
 def tool_schemas() -> list[dict[str, Any]]:
@@ -16,6 +16,10 @@ def tool_schemas() -> list[dict[str, Any]]:
         {"name": "get_case", "description": "Read an experiment case.", "input_schema": {"required": ["case_id"]}},
         {"name": "list_generated_contents", "description": "List prior generated artifacts.", "input_schema": {"required": ["case_id"]}},
         {"name": "list_attachments", "description": "List case attachments.", "input_schema": {"required": ["case_id"]}},
+        {"name": "list_case_modules", "description": "List optional modules attached to a case.", "input_schema": {"required": ["case_id"]}},
+        {"name": "create_case_module", "description": "Create a case module for stability, beam, spectrum, or component workflows.", "input_schema": {"required": ["case_id", "module_type"]}},
+        {"name": "run_case_module_analysis", "description": "Run a case module analysis or generation workflow.", "input_schema": {"required": ["module_id"]}},
+        {"name": "list_component_items", "description": "List component/procurement items for a case.", "input_schema": {"required": ["case_id"]}},
         {"name": "search_knowledge", "description": "Search indexed cases, attachments, and generated content.", "input_schema": {"required": ["query"]}},
         {"name": "search_similar_cases", "description": "Search case sources with similar symptoms and cavity type.", "input_schema": {"required": ["query"]}},
         {"name": "save_generated_content", "description": "Persist an Agent artifact.", "input_schema": {"required": ["case_id", "content_type", "content"]}},
@@ -95,6 +99,107 @@ def list_attachments_payload(case: ExperimentCase) -> dict[str, Any]:
             for attachment in case.attachments
         ]
     }
+
+
+def list_case_modules_payload(case: ExperimentCase) -> dict[str, Any]:
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "module_type": item.module_type,
+                "title": item.title,
+                "status": item.status,
+                "config_json": item.config_json or {},
+                "result_json": item.result_json or {},
+            }
+            for item in case.case_modules
+        ]
+    }
+
+
+def create_case_module_payload(db: Session, case: ExperimentCase, module_type: str, title: str | None = None) -> dict[str, Any]:
+    labels = {
+        "stability": "Stability measurement",
+        "beam_profile": "Beam profile analysis",
+        "spectrum": "Spectrum analysis",
+        "components": "Case component list",
+        "module_management": "Case module",
+    }
+    normalized_type = "components" if module_type == "module_management" else module_type
+    module = CaseModule(
+        case_id=case.id,
+        module_type=normalized_type,
+        title=title or labels.get(normalized_type, normalized_type),
+        status="draft",
+        config_json={},
+        result_json={},
+    )
+    db.add(module)
+    db.flush()
+    return {
+        "module_id": module.id,
+        "module_type": module.module_type,
+        "title": module.title,
+        "status": module.status,
+    }
+
+
+def list_component_items_payload(case: ExperimentCase, db: Session | None = None) -> dict[str, Any]:
+    items = case.component_items
+    if db is not None:
+        items = db.query(CaseComponentItem).filter(CaseComponentItem.case_id == case.id).order_by(CaseComponentItem.category, CaseComponentItem.name).all()
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "module_id": item.module_id,
+                "category": item.category,
+                "name": item.name,
+                "specification": item.specification,
+                "quantity": item.quantity,
+                "unit": item.unit,
+                "owned": item.owned,
+                "procurement_status": item.procurement_status,
+            }
+            for item in items
+        ]
+    }
+
+
+def generate_component_items_payload(db: Session, case: ExperimentCase, module_id: int | None = None) -> dict[str, Any]:
+    existing = db.query(CaseComponentItem).filter(CaseComponentItem.case_id == case.id)
+    if module_id is not None:
+        existing = existing.filter(CaseComponentItem.module_id == module_id)
+    if existing.count() == 0:
+        defaults = [
+            ("instrument", "Laser safety eyewear", "OD and wavelength must match the setup", "Required PPE"),
+            ("instrument", "Power meter", "Sensor head and range suitable for expected output", "Measure output power"),
+            ("instrument", "BeamGage camera or beam profiler", "Compatible wavelength, attenuation, and pixel scale", "Measure beam profile"),
+            ("optic", "Beam dumps", "Rated for wavelength and power", "Terminate beams"),
+            ("optic", "Input mirror", "Coating and ROC from plan", "Cavity input optic"),
+            ("optic", "Output coupler", "Transmission from plan", "Cavity output optic"),
+            ("crystal", "Gain medium", "Material, doping, dimensions TBD", "Laser gain"),
+            ("mount", "Kinematic mirror mounts", "Stable and compatible with optic diameter", "Alignment"),
+        ]
+        for category, name, specification, purpose in defaults:
+            db.add(
+                CaseComponentItem(
+                    case_id=case.id,
+                    module_id=module_id,
+                    category=category,
+                    name=name,
+                    specification=specification,
+                    quantity=1,
+                    unit="pcs",
+                    purpose=purpose,
+                    required=True,
+                    owned=False,
+                    procurement_status="needed",
+                    source="agent_generated",
+                )
+            )
+        db.flush()
+    return list_component_items_payload(case, db)
 
 
 def save_generated_content_payload(generated: GeneratedContent) -> dict[str, Any]:

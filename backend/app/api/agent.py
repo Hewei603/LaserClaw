@@ -3,10 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..agent.context import build_chat_context
+from ..agent.memory import maybe_summarize_session
 from ..agent.orchestrator import create_and_run_task
-from ..agent.tools import tool_schemas
+from ..auth.acl import accessible_case_ids, assert_case_edit, assert_case_view
+from ..auth.security import Principal, get_current_principal
 from ..database import get_db
-from ..models import AgentChatMessage, AgentChatSession, AgentTask, AgentToolCall, ExperimentCase
+from ..models import AgentChatMessage, AgentChatSession, AgentMemoryItem, AgentSessionSummary, AgentTask, AgentToolCall, ExperimentCase
 from ..observability.audit import record_audit
 from ..providers import get_ai_provider
 from ..schemas import (
@@ -53,6 +55,23 @@ _CONTENT_KEYWORDS = {
         "rezonator", "仿真输入", "腔型草稿", "谐振腔草稿", "腔参数草稿",
         "resonator draft", "simulation input", "cavity draft",
     ],
+    "stability": [
+        "稳定性", "功率稳定", "功率计读数", "ocr", "稳定性报告",
+        "power stability", "power meter", "stability report",
+    ],
+    "beam_profile": [
+        "光斑", "光斑分析", "光斑直径", "beamgage", "beam profile", "beam spot", "ellipticity",
+    ],
+    "spectrum": [
+        "光谱", "峰值", "中心波长", "谱宽", "半高宽", "fwhm", "spectrum", "wavelength", "linewidth",
+    ],
+    "components": [
+        "器件清单", "元件清单", "采购表", "采购清单", "已有器件",
+        "component list", "equipment list", "procurement", "bill of materials", "bom",
+    ],
+    "module_management": [
+        "模块", "添加模块", "更改模块", "删除模块", "case module",
+    ],
 }
 
 
@@ -68,7 +87,7 @@ def _route_mode(message: str) -> str:
     if not has_intent:
         return "chat"
 
-    for mode in ["rezonator", "troubleshooting", "report", "plan"]:
+    for mode in ["stability", "beam_profile", "spectrum", "components", "module_management", "rezonator", "troubleshooting", "report", "plan"]:
         keywords = _CONTENT_KEYWORDS[mode]
         if any(kw in text for kw in keywords):
             return mode
@@ -76,16 +95,20 @@ def _route_mode(message: str) -> str:
     return "chat"
 
 
-def _get_case(case_id: int | None, db: Session) -> ExperimentCase | None:
+def _get_case(case_id: int | None, db: Session, principal: Principal, *, write: bool = False) -> ExperimentCase | None:
     if case_id is None:
         return None
     case = db.query(ExperimentCase).filter(ExperimentCase.id == case_id).first()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Case {case_id} does not exist")
+    if write:
+        assert_case_edit(db, case, principal)
+    else:
+        assert_case_view(db, case, principal)
     return case
 
 
-def _get_or_create_session(request: AgentChatRequest, db: Session) -> AgentChatSession:
+def _get_or_create_session(request: AgentChatRequest, db: Session, principal: Principal) -> AgentChatSession:
     if request.session_id is not None:
         session = db.query(AgentChatSession).filter(AgentChatSession.id == request.session_id).first()
         if not session:
@@ -94,11 +117,13 @@ def _get_or_create_session(request: AgentChatRequest, db: Session) -> AgentChatS
                 detail=f"Agent chat session {request.session_id} does not exist",
             )
         if request.case_id is not None and session.case_id != request.case_id:
-            _get_case(request.case_id, db)
+            _get_case(request.case_id, db, principal)
             session.case_id = request.case_id
+        if session.case_id is not None:
+            _get_case(session.case_id, db, principal)
         return session
 
-    case = _get_case(request.case_id, db)
+    case = _get_case(request.case_id, db, principal)
     session = AgentChatSession(case_id=case.id if case else None, title=request.message[:80])
     db.add(session)
     db.flush()
@@ -107,9 +132,13 @@ def _get_or_create_session(request: AgentChatRequest, db: Session) -> AgentChatS
 
 
 @router.post("/sessions", response_model=AgentChatSessionResponse, status_code=status.HTTP_201_CREATED)
-async def create_chat_session(request: AgentChatSessionCreate, db: Session = Depends(get_db)):
+async def create_chat_session(
+    request: AgentChatSessionCreate,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Create a persistent Agent chat session."""
-    case = _get_case(request.case_id, db)
+    case = _get_case(request.case_id, db, principal)
     session = AgentChatSession(case_id=case.id if case else None, title=request.title)
     db.add(session)
     db.flush()
@@ -120,37 +149,62 @@ async def create_chat_session(request: AgentChatSessionCreate, db: Session = Dep
 
 
 @router.get("/sessions", response_model=list[AgentChatSessionResponse])
-async def list_chat_sessions(case_id: int | None = None, db: Session = Depends(get_db)):
+async def list_chat_sessions(
+    case_id: int | None = None,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """List Agent chat sessions."""
     query = db.query(AgentChatSession)
     if case_id is not None:
+        _get_case(case_id, db, principal)
         query = query.filter(AgentChatSession.case_id == case_id)
+    else:
+        visible_ids = accessible_case_ids(db, principal)
+        if visible_ids is not None:
+            query = query.filter((AgentChatSession.case_id.is_(None)) | (AgentChatSession.case_id.in_(visible_ids)))
     return query.order_by(AgentChatSession.created_at.desc()).all()
 
 
 @router.get("/sessions/{session_id}", response_model=AgentChatSessionResponse)
-async def get_chat_session(session_id: int, db: Session = Depends(get_db)):
+async def get_chat_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Get one Agent chat session with messages."""
     session = db.query(AgentChatSession).filter(AgentChatSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent chat session {session_id} does not exist")
+    if session.case_id is not None:
+        _get_case(session.case_id, db, principal)
     return session
 
 
 @router.get("/sessions/{session_id}/messages", response_model=list[AgentChatMessageResponse])
-async def list_chat_messages(session_id: int, db: Session = Depends(get_db)):
+async def list_chat_messages(
+    session_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """List messages for one Agent chat session."""
     session = db.query(AgentChatSession).filter(AgentChatSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent chat session {session_id} does not exist")
+    if session.case_id is not None:
+        _get_case(session.case_id, db, principal)
     return session.messages
 
 
 @router.post("/chat", response_model=AgentChatResponse)
-async def chat(request: AgentChatRequest, db: Session = Depends(get_db)):
+async def chat(
+    request: AgentChatRequest,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Chat with LaserClaw Agent, optionally routing the message to a saved tool artifact."""
-    session = _get_or_create_session(request, db)
-    case = _get_case(session.case_id, db)
+    session = _get_or_create_session(request, db, principal)
+    case = _get_case(session.case_id, db, principal)
     db.add(AgentChatMessage(session_id=session.id, role="user", content=request.message, metadata_json={"mode": request.mode}))
     db.flush()
 
@@ -179,6 +233,7 @@ async def chat(request: AgentChatRequest, db: Session = Depends(get_db)):
             )
         )
         record_audit(db, action="agent_chat.message", resource_type="agent_chat_session", resource_id=str(session.id))
+        await maybe_summarize_session(db, session_id=session.id, case_id=session.case_id)
         db.commit()
         return AgentChatResponse(
             session_id=session.id,
@@ -210,6 +265,7 @@ async def chat(request: AgentChatRequest, db: Session = Depends(get_db)):
             citations=citations,
         )
 
+    assert_case_edit(db, case, principal)
     task = await create_and_run_task(
         db,
         case_id=case.id,
@@ -233,6 +289,7 @@ async def chat(request: AgentChatRequest, db: Session = Depends(get_db)):
             },
         )
     )
+    await maybe_summarize_session(db, session_id=session.id, case_id=session.case_id)
     db.commit()
     return AgentChatResponse(
         session_id=session.id,
@@ -245,10 +302,14 @@ async def chat(request: AgentChatRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/tasks", response_model=AgentTaskResponse, status_code=status.HTTP_201_CREATED)
-async def create_task(request: AgentTaskCreate, db: Session = Depends(get_db)):
+async def create_task(
+    request: AgentTaskCreate,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Create and run an Agent task synchronously."""
     if request.case_id is not None:
-        _get_case(request.case_id, db)
+        _get_case(request.case_id, db, principal, write=True)
     return await create_and_run_task(
         db,
         case_id=request.case_id,
@@ -259,33 +320,58 @@ async def create_task(request: AgentTaskCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/tasks", response_model=list[AgentTaskResponse])
-async def list_tasks(case_id: int | None = None, db: Session = Depends(get_db)):
+async def list_tasks(
+    case_id: int | None = None,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """List Agent tasks."""
     query = db.query(AgentTask)
     if case_id is not None:
+        _get_case(case_id, db, principal)
         query = query.filter(AgentTask.case_id == case_id)
+    else:
+        visible_ids = accessible_case_ids(db, principal)
+        if visible_ids is not None:
+            query = query.filter((AgentTask.case_id.is_(None)) | (AgentTask.case_id.in_(visible_ids)))
     return query.order_by(AgentTask.created_at.desc()).all()
 
 
 @router.get("/tasks/{task_id}", response_model=AgentTaskResponse)
-async def get_task(task_id: int, db: Session = Depends(get_db)):
+async def get_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Get one Agent task."""
     task = db.query(AgentTask).filter(AgentTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent task {task_id} does not exist")
+    if task.case_id is not None:
+        _get_case(task.case_id, db, principal)
     return task
 
 
 @router.post("/tasks/{task_id}/continue", response_model=AgentTaskResponse)
-async def continue_task(task_id: int, db: Session = Depends(get_db)):
+async def continue_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Continue a waiting task. Local tasks currently run synchronously, so this returns the existing task."""
-    return await get_task(task_id, db)
+    return await get_task(task_id, db, principal)
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=AgentTaskResponse)
-async def cancel_task(task_id: int, db: Session = Depends(get_db)):
+async def cancel_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Cancel a task that has not completed."""
-    task = await get_task(task_id, db)
+    task = await get_task(task_id, db, principal)
+    if task.case_id is not None:
+        _get_case(task.case_id, db, principal, write=True)
     if task.status not in {"completed", "failed", "cancelled"}:
         task.status = "cancelled"
         db.commit()
@@ -294,6 +380,70 @@ async def cancel_task(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/tasks/{task_id}/tool-calls", response_model=list[AgentToolCallResponse])
-async def list_task_tool_calls(task_id: int, db: Session = Depends(get_db)):
+async def list_task_tool_calls(
+    task_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """List tool calls for a task."""
+    await get_task(task_id, db, principal)
     return db.query(AgentToolCall).filter(AgentToolCall.task_id == task_id).order_by(AgentToolCall.created_at.asc()).all()
+
+
+@router.get("/sessions/{session_id}/summary")
+async def get_session_summary_api(
+    session_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Return the rolling conversation summary for a session."""
+    session = db.query(AgentChatSession).filter(AgentChatSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent chat session {session_id} does not exist")
+    if session.case_id is not None:
+        _get_case(session.case_id, db, principal)
+    summary = (
+        db.query(AgentSessionSummary)
+        .filter(AgentSessionSummary.session_id == session_id)
+        .order_by(
+            AgentSessionSummary.updated_at.desc().nullslast(),
+            AgentSessionSummary.created_at.desc(),
+        )
+        .first()
+    )
+    return {
+        "session_id": session_id,
+        "summary": summary.summary if summary else None,
+        "message_count": summary.message_count if summary else 0,
+        "last_message_id": summary.last_message_id if summary else None,
+    }
+
+
+@router.get("/sessions/{session_id}/memories")
+async def list_session_memories(
+    session_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Return durable memory items extracted from a session."""
+    session = db.query(AgentChatSession).filter(AgentChatSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent chat session {session_id} does not exist")
+    if session.case_id is not None:
+        _get_case(session.case_id, db, principal)
+    items = (
+        db.query(AgentMemoryItem)
+        .filter(AgentMemoryItem.session_id == session_id)
+        .order_by(AgentMemoryItem.importance.desc(), AgentMemoryItem.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": item.id,
+            "memory_type": item.memory_type,
+            "content": item.content,
+            "importance": item.importance,
+            "created_at": item.created_at,
+        }
+        for item in items
+    ]

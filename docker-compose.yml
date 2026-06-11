@@ -3,15 +3,15 @@ services:
     image: pgvector/pgvector:pg15
     container_name: laserclaw_db
     environment:
-      POSTGRES_USER: laserclaw
-      POSTGRES_PASSWORD: laserclaw123
-      POSTGRES_DB: laserclaw
+      POSTGRES_USER: ${POSTGRES_USER:-laserclaw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-laserclaw123}
+      POSTGRES_DB: ${POSTGRES_DB:-laserclaw}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U laserclaw"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-laserclaw}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -22,7 +22,7 @@ services:
       dockerfile: Dockerfile
     container_name: laserclaw_backend
     environment:
-      DATABASE_URL: postgresql://laserclaw:laserclaw123@db:5432/laserclaw
+      DATABASE_URL: postgresql://${POSTGRES_USER:-laserclaw}:${POSTGRES_PASSWORD:-laserclaw123}@db:5432/${POSTGRES_DB:-laserclaw}
       UPLOAD_DIR: /app/uploads
       MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-52428800}
       AI_PROVIDER: ${AI_PROVIDER:-mock}
@@ -39,14 +39,18 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-sql_json}
-      VECTOR_STORE_DIR: ${VECTOR_STORE_DIR:-/app/vector_store}
+      VECTOR_STORE_DIR: ${DOCKER_VECTOR_STORE_DIR:-/app/vector_store}
       RETRIEVAL_VECTOR_WEIGHT: ${RETRIEVAL_VECTOR_WEIGHT:-0.72}
       RETRIEVAL_LEXICAL_WEIGHT: ${RETRIEVAL_LEXICAL_WEIGHT:-0.28}
       RETRIEVAL_MIN_SCORE: ${RETRIEVAL_MIN_SCORE:-0.08}
       RETRIEVAL_LOW_CONFIDENCE_SCORE: ${RETRIEVAL_LOW_CONFIDENCE_SCORE:-0.14}
       RETRIEVAL_MIN_RESULTS: ${RETRIEVAL_MIN_RESULTS:-1}
+      PGVECTOR_DIMENSION: ${PGVECTOR_DIMENSION:-384}
+      RERANKER_PROVIDER: ${RERANKER_PROVIDER:-none}
+      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
+      RERANKER_TOP_K: ${RERANKER_TOP_K:-20}
+      RERANKER_WEIGHT: ${RERANKER_WEIGHT:-0.65}
     volumes:
-      - ./backend:/app
       - backend_uploads:/app/uploads
       - backend_vector_store:/app/vector_store
     ports:
@@ -54,23 +58,29 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://127.0.0.1:8000}
     container_name: laserclaw_frontend
-    environment:
-      VITE_API_URL: http://127.0.0.1:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     ports:
       - "5173:5173"
     depends_on:
       - backend
-    command: npm run dev -- --host
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
 
 volumes:
   postgres_data:

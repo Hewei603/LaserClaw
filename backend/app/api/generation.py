@@ -8,6 +8,8 @@ from typing import Any, Awaitable
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from ..auth.acl import assert_case_edit, assert_case_view
+from ..auth.security import Principal, get_current_principal
 from ..database import get_db
 from ..knowledge.ingestion import create_generated_content_source
 from ..knowledge.retrieval import results_to_citations, search_case_and_global_knowledge
@@ -115,9 +117,15 @@ def _save_generated_content(
 
 
 @router.post("/{case_id}/generate-plan", response_model=GeneratedContentResponse)
-async def generate_plan(case_id: int, request: GenerateRequest = GenerateRequest(), db: Session = Depends(get_db)):
+async def generate_plan(
+    case_id: int,
+    request: GenerateRequest = GenerateRequest(),
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Generate an experiment plan with retrieval citations."""
     case = _get_case_or_404(case_id, db)
+    assert_case_edit(db, case, principal)
     provider = get_ai_provider()
     content, latency_ms = await _run_generation("plan", provider.generate_plan(_full_case_data(case)))
     _augment_with_rag(case, "plan", content, request, db)
@@ -125,9 +133,15 @@ async def generate_plan(case_id: int, request: GenerateRequest = GenerateRequest
 
 
 @router.post("/{case_id}/generate-rezonator", response_model=GeneratedContentResponse)
-async def generate_rezonator(case_id: int, request: GenerateRequest = GenerateRequest(), db: Session = Depends(get_db)):
+async def generate_rezonator(
+    case_id: int,
+    request: GenerateRequest = GenerateRequest(),
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Generate a ReZonator schema draft."""
     case = _get_case_or_404(case_id, db)
+    assert_case_edit(db, case, principal)
     case_data = {"title": case.title, "cavity_type": case.cavity_type, "parameters": case.parameters}
     provider = get_ai_provider()
     content, latency_ms = await _run_generation("rezonator", provider.generate_rezonator_schema(case_data))
@@ -136,9 +150,15 @@ async def generate_rezonator(case_id: int, request: GenerateRequest = GenerateRe
 
 
 @router.post("/{case_id}/generate-troubleshooting", response_model=GeneratedContentResponse)
-async def generate_troubleshooting(case_id: int, request: GenerateRequest = GenerateRequest(), db: Session = Depends(get_db)):
+async def generate_troubleshooting(
+    case_id: int,
+    request: GenerateRequest = GenerateRequest(),
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Generate troubleshooting advice with retrieved context citations."""
     case = _get_case_or_404(case_id, db)
+    assert_case_edit(db, case, principal)
     case_data = {"title": case.title, "cavity_type": case.cavity_type, "parameters": case.parameters}
     provider = get_ai_provider()
     content, latency_ms = await _run_generation("troubleshooting", provider.generate_troubleshooting(case.symptoms, case_data))
@@ -147,9 +167,15 @@ async def generate_troubleshooting(case_id: int, request: GenerateRequest = Gene
 
 
 @router.post("/{case_id}/generate-report", response_model=GeneratedContentResponse)
-async def generate_report(case_id: int, request: GenerateRequest = GenerateRequest(), db: Session = Depends(get_db)):
+async def generate_report(
+    case_id: int,
+    request: GenerateRequest = GenerateRequest(),
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Generate an experiment report."""
     case = _get_case_or_404(case_id, db)
+    assert_case_edit(db, case, principal)
     provider = get_ai_provider()
     content, latency_ms = await _run_generation("report", provider.generate_report(_full_case_data(case)))
     _augment_with_rag(case, "report", content, request, db)
@@ -157,8 +183,15 @@ async def generate_report(case_id: int, request: GenerateRequest = GenerateReque
 
 
 @router.get("/{case_id}/generated-contents", response_model=list[GeneratedContentResponse])
-async def list_generated_contents(case_id: int, content_type: str = None, db: Session = Depends(get_db)):
+async def list_generated_contents(
+    case_id: int,
+    content_type: str = None,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """List generated content for a case."""
+    case = _get_case_or_404(case_id, db)
+    assert_case_view(db, case, principal)
     query = db.query(GeneratedContent).filter(GeneratedContent.case_id == case_id)
     if content_type:
         query = query.filter(GeneratedContent.content_type == content_type)

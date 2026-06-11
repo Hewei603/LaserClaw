@@ -3,7 +3,8 @@
 The script is intentionally local and reproducible:
 - loads the repository root .env without printing secrets
 - uses the backend SQLite database unless DATABASE_URL is explicitly overridden
-- indexes PDFs under backend/uploads/global_knowledge when missing
+- indexes synthetic benchmark documents under docs/evals/synthetic_laser_docs
+- optionally indexes files under backend/uploads/global_knowledge when requested
 - reports standard retrieval and latency metrics: Recall@K, MRR, P50/P95
 """
 from __future__ import annotations
@@ -57,20 +58,25 @@ def summarize_latency(values: list[float]) -> dict[str, float]:
     }
 
 
-def configure_environment() -> None:
-    load_env_file(ROOT / ".env", override=True)
-    load_env_file(BACKEND / ".env", override=False)
+def configure_environment(*, use_env_file: bool = False) -> None:
+    if use_env_file:
+        load_env_file(ROOT / ".env", override=False)
+        load_env_file(BACKEND / ".env", override=False)
     database_url = os.environ.get("DATABASE_URL", "")
     if not database_url or "@db:" in database_url or database_url.startswith("postgresql://laserclaw:laserclaw123@db"):
-        os.environ["DATABASE_URL"] = "sqlite:///./laserclaw.db"
+        os.environ["DATABASE_URL"] = "sqlite:///./_resume_metrics.db"
     os.environ.setdefault("UPLOAD_DIR", str(BACKEND / "uploads"))
     if os.environ.get("UPLOAD_DIR") == "/app/uploads":
         os.environ["UPLOAD_DIR"] = str(BACKEND / "uploads")
     os.environ.setdefault("AUTO_CREATE_TABLES", "true")
-    os.environ.setdefault("STRICT_PROVIDER", "true")
+    os.environ.setdefault("AI_PROVIDER", "mock")
+    os.environ.setdefault("STRICT_PROVIDER", "false")
+    os.environ.setdefault("EMBEDDING_PROVIDER", "local")
+    os.environ.setdefault("RETRIEVAL_BACKEND", "sql_json")
+    os.environ.setdefault("RERANKER_PROVIDER", "none")
 
 
-def ensure_knowledge_index(db) -> dict[str, Any]:
+def ensure_knowledge_index(db, *, include_upload_knowledge: bool = False) -> dict[str, Any]:
     from sqlalchemy import text
 
     from app.database import Base, engine
@@ -115,18 +121,36 @@ def ensure_knowledge_index(db) -> dict[str, Any]:
         db.commit()
 
     indexed = []
-    upload_dir = BACKEND / "uploads" / "global_knowledge"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    for path in sorted(upload_dir.glob("*.pdf")):
-        text = extract_text_from_file(str(path), "application/pdf")
+    candidate_paths = []
+    synthetic_dir = ROOT / "docs" / "evals" / "synthetic_laser_docs"
+    for pattern in ("*.md", "*.txt", "*.pdf"):
+        candidate_paths.extend(sorted(synthetic_dir.glob(pattern)))
+
+    if include_upload_knowledge:
+        upload_dir = BACKEND / "uploads" / "global_knowledge"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        for pattern in ("*.md", "*.txt", "*.pdf"):
+            candidate_paths.extend(sorted(upload_dir.glob(pattern)))
+
+    for path in candidate_paths:
+        content_type = "application/pdf" if path.suffix.lower() == ".pdf" else "text/markdown"
+        text = extract_text_from_file(str(path), content_type)
         digest = content_hash(text)
         source = db.query(KnowledgeSource).filter(KnowledgeSource.content_hash == digest).first()
         if source is None:
-            source = create_global_file_source(db, title=path.name, filepath=str(path), content_type="application/pdf")
+            title = path.stem.replace("_", " ").title()
+            if path.name == "laser_safety_sop.md":
+                title = "Synthetic Laser Safety SOP"
+            elif path.name == "optics_components_catalog.md":
+                title = "Synthetic Optics Components Catalog"
+            elif path.name == "troubleshooting_case_notes.md":
+                title = "Synthetic Troubleshooting Case Notes"
+            source = create_global_file_source(db, title=title, filepath=str(path), content_type=content_type)
         source.governance_status = source.governance_status or "approved"
         source.version = source.version or 1
         metadata = dict(source.metadata_json or {})
         metadata.setdefault("benchmark_file_size_bytes", path.stat().st_size)
+        metadata.setdefault("benchmark_source", "synthetic_laser_docs" if synthetic_dir in path.parents else "global_knowledge")
         source.metadata_json = metadata
         indexed.append({"title": source.title, "bytes": path.stat().st_size})
     db.commit()
@@ -134,10 +158,10 @@ def ensure_knowledge_index(db) -> dict[str, Any]:
     sources = db.query(KnowledgeSource).all()
     chunks = sum(len(source.chunks) for source in sources)
     return {
-        "pdf_files": indexed,
+        "benchmark_files": indexed,
         "source_count": len(sources),
         "chunk_count": chunks,
-        "total_pdf_bytes": sum(item["bytes"] for item in indexed),
+        "total_benchmark_bytes": sum(item["bytes"] for item in indexed),
     }
 
 
@@ -151,6 +175,8 @@ def source_ids(db) -> dict[str, int]:
             ids["safety"] = source.id
         if "optic" in title or "component" in title or "catalog" in title:
             ids["optics"] = source.id
+        if "troubleshooting" in title or "case notes" in title:
+            ids["troubleshooting"] = source.id
     return ids
 
 
@@ -343,14 +369,34 @@ def build_dataset(ids: dict[str, int]) -> list[dict[str, Any]]:
     ]
 
 
+def _legacy_build_dataset(ids: dict[str, int]) -> list[dict[str, Any]]:
+    safety = ids["safety"]
+    optics = ids["optics"]
+    troubleshooting = ids["troubleshooting"]
+    return [
+        {"query": "What OD eyewear is required for 1030-1100 nm Class 4 alignment?", "expected_source_id": safety, "expected_terms": ["OD >= 5", "IR-1064-OD5"]},
+        {"query": "High-power Class 4 operation requires what authorization and watcher conditions?", "expected_source_id": safety, "expected_terms": ["L3 authorization", "Watcher"]},
+        {"query": "疑似眼照射后第一步和就医时间要求是什么？", "expected_source_id": safety, "expected_terms": ["急停", "15 分钟"]},
+        {"query": "Which shutdown conditions trigger a red-tag stop?", "expected_source_id": safety, "expected_terms": ["interlock", "eyewear OD mismatch", "beam dump"]},
+        {"query": "Which 1064 nm output coupler has T=5 and ROC=100?", "expected_source_id": optics, "expected_terms": ["MIR-OC1064-T05", "ROC=100"]},
+        {"query": "LBO 无 532 nm 输出时优先检查哪些因素？", "expected_source_id": optics, "expected_terms": ["基频功率", "偏振", "LBO 角度", "温度"]},
+        {"query": "What filter and spectrometer should be used for 532 nm spectrum measurement?", "expected_source_id": optics, "expected_terms": ["FLT-BP-532", "SPEC-USB"]},
+        {"query": "Which beam block should temporarily contain near-infrared beams?", "expected_source_id": optics, "expected_terms": ["BB-BLOCK-IR"]},
+        {"query": "What low-risk checks help diagnose low output power after realignment?", "expected_source_id": troubleshooting, "expected_terms": ["cleaning inspection", "pump spot position", "mirror angle rollback"]},
+        {"query": "What metrics should a power stability report include?", "expected_source_id": troubleshooting, "expected_terms": ["sampling duration", "standard deviation", "peak-to-peak drift"]},
+    ]
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--skip-llm", action="store_true")
+    parser.add_argument("--use-env-file", action="store_true", help="Load .env files for real provider or deployment-specific benchmarks.")
+    parser.add_argument("--include-upload-knowledge", action="store_true", help="Also index files under backend/uploads/global_knowledge.")
     args = parser.parse_args()
 
-    configure_environment()
+    configure_environment(use_env_file=args.use_env_file)
     os.chdir(BACKEND)
 
     from app.config import get_settings
@@ -360,9 +406,9 @@ async def main() -> None:
     settings = get_settings()
     db = SessionLocal()
     try:
-        index_summary = ensure_knowledge_index(db)
+        index_summary = ensure_knowledge_index(db, include_upload_knowledge=args.include_upload_knowledge)
         ids = source_ids(db)
-        missing = {"safety", "optics"} - set(ids)
+        missing = {"safety", "optics", "troubleshooting"} - set(ids)
         if missing:
             raise RuntimeError(f"Missing required benchmark knowledge source categories: {sorted(missing)}")
         dataset = build_dataset(ids)

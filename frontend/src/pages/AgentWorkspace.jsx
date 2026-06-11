@@ -62,18 +62,6 @@ function AgentWorkspace() {
     }
   };
 
-  const uploadGlobalSource = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    try {
-      await knowledgeApi.uploadGlobalSource(file);
-      event.target.value = '';
-      await loadGlobalSources();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
   const loadSession = async (id) => {
     if (!id) {
       setSessionId(null);

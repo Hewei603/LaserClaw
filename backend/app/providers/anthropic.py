@@ -322,3 +322,25 @@ Return JSON with this shape:
             "Never claim to operate hardware. Return only valid JSON with no markdown or prose outside JSON."
         )
         return f"{base} {extra}".strip()
+
+    async def summarize_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        previous_summary: str | None = None,
+    ) -> Dict[str, Any]:
+        formatted = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
+        user_prompt = (
+            f"Previous summary:\n{previous_summary or '(none)'}\n\n"
+            f"New messages:\n{formatted[:12000]}\n\n"
+            "Summarise the conversation for future laser experiment assistance context. "
+            "Return a JSON object with exactly two keys:\n"
+            '  "summary": a concise rolling summary string (max 1200 chars),\n'
+            '  "memories": a list of objects each with keys '
+            '"content" (string), "memory_type" (fact|decision|constraint|preference), '
+            '"importance" (integer 1-5).'
+        )
+        result = await self._create_json_message(self._system_prompt(), user_prompt)
+        return {
+            "summary": str(result.get("summary", "")),
+            "memories": result.get("memories") or [],
+        }

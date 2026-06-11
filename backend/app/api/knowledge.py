@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from ..auth.acl import accessible_case_ids, assert_case_view, can_manage_knowledge
 from ..auth.security import Principal, get_current_principal
 from ..config import get_settings
 from ..database import get_db
@@ -26,11 +27,23 @@ GLOBAL_KNOWLEDGE_EXTENSIONS = {".pdf", ".txt", ".md", ".csv", ".tsv", ".json", "
 
 
 @router.get("/sources", response_model=list[KnowledgeSourceResponse])
-async def list_sources(case_id: int | None = None, db: Session = Depends(get_db)):
+async def list_sources(
+    case_id: int | None = None,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """List indexed knowledge sources."""
     query = db.query(KnowledgeSource)
     if case_id is not None:
+        case = db.query(ExperimentCase).filter(ExperimentCase.id == case_id).first()
+        if not case:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Case {case_id} does not exist")
+        assert_case_view(db, case, principal)
         query = query.filter(KnowledgeSource.case_id == case_id)
+    else:
+        visible_ids = accessible_case_ids(db, principal)
+        if visible_ids is not None:
+            query = query.filter((KnowledgeSource.case_id.is_(None)) | (KnowledgeSource.case_id.in_(visible_ids)))
     return query.order_by(KnowledgeSource.created_at.desc()).all()
 
 
@@ -41,6 +54,8 @@ async def upload_global_source(
     principal: Principal = Depends(get_current_principal),
 ):
     """Upload a global lab knowledge file and index it for Agent/RAG use."""
+    if not can_manage_knowledge(principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or reviewer role required")
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in GLOBAL_KNOWLEDGE_EXTENSIONS:
         raise HTTPException(
@@ -75,20 +90,34 @@ async def upload_global_source(
 
 
 @router.get("/sources/{source_id}", response_model=KnowledgeSourceResponse)
-async def get_source(source_id: int, db: Session = Depends(get_db)):
+async def get_source(
+    source_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Get one indexed knowledge source."""
     source = db.query(KnowledgeSource).filter(KnowledgeSource.id == source_id).first()
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Knowledge source {source_id} does not exist")
+    if source.case is not None:
+        assert_case_view(db, source.case, principal)
     return source
 
 
 @router.post("/sources/{source_id}/reindex", response_model=KnowledgeSourceResponse)
-async def reindex_source(source_id: int, db: Session = Depends(get_db)):
+async def reindex_source(
+    source_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Reindex a source after parser, embedding, or vector backend changes."""
     source = db.query(KnowledgeSource).filter(KnowledgeSource.id == source_id).first()
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Knowledge source {source_id} does not exist")
+    if source.case is not None:
+        assert_case_view(db, source.case, principal)
+    elif not can_manage_knowledge(principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or reviewer role required")
     if source.source_type == "case" and source.case_id:
         source = upsert_case_source(db, source.case)
     elif source.attachment is not None:
@@ -119,7 +148,7 @@ async def update_source_governance(
     principal: Principal = Depends(get_current_principal),
 ):
     """Review, approve, deprecate, or archive an indexed knowledge source."""
-    if principal.role not in {"admin", "reviewer"}:
+    if not can_manage_knowledge(principal):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or reviewer role required")
     source = db.query(KnowledgeSource).filter(KnowledgeSource.id == source_id).first()
     if not source:
@@ -137,11 +166,17 @@ async def update_source_governance(
 
 
 @router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_source(source_id: int, db: Session = Depends(get_db)):
+async def delete_source(
+    source_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Delete a global knowledge source and its indexed chunks."""
     source = db.query(KnowledgeSource).filter(KnowledgeSource.id == source_id).first()
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Knowledge source {source_id} does not exist")
+    if not can_manage_knowledge(principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or reviewer role required")
     if source.source_type != "global_attachment":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only global knowledge sources can be deleted from this endpoint")
     # Remove file from disk if it exists
@@ -156,12 +191,18 @@ async def delete_source(source_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/search", response_model=KnowledgeSearchResponse)
-async def search(request: KnowledgeSearchRequest, db: Session = Depends(get_db)):
+async def search(
+    request: KnowledgeSearchRequest,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Search indexed knowledge and return citation-ready results."""
     if request.case_id is not None:
         case = db.query(ExperimentCase).filter(ExperimentCase.id == request.case_id).first()
         if not case:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Case {request.case_id} does not exist")
+        assert_case_view(db, case, principal)
+    visible_ids = accessible_case_ids(db, principal)
     run, results = search_knowledge(
         db,
         query=request.query,
@@ -169,6 +210,7 @@ async def search(request: KnowledgeSearchRequest, db: Session = Depends(get_db))
         source_type=request.source_type,
         top_k=request.top_k,
         task_id=request.task_id,
+        allowed_case_ids=visible_ids,
     )
     db.commit()
     return KnowledgeSearchResponse(

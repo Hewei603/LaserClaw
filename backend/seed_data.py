@@ -165,7 +165,7 @@ async def seed_database():
             db.refresh(case)
 
             # 为案例生成内容
-            print(f"  生成内容...")
+            print("  生成内容...")
             await generate_content_for_case(db, case)
 
         print(f"成功创建 {len(SAMPLE_CASES)} 个示例案例")

@@ -1,6 +1,6 @@
-"""
-测试配置
-"""
+"""Test configuration."""
+import os
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -12,7 +12,7 @@ from app.main import app
 from app.database import get_db
 
 
-# 使用内存数据库进行测试
+# Use an in-memory database for API tests.
 SQLALCHEMY_DATABASE_URL = "sqlite://"
 
 engine = create_engine(
@@ -29,6 +29,10 @@ def use_mock_ai_provider(monkeypatch):
     monkeypatch.setenv("AI_PROVIDER", "mock")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    if not os.environ.get("RUN_PGVECTOR_TESTS"):
+        monkeypatch.setenv("EMBEDDING_PROVIDER", "local")
+        monkeypatch.setenv("RETRIEVAL_BACKEND", "sql_json")
+        monkeypatch.setenv("RERANKER_PROVIDER", "none")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -36,7 +40,7 @@ def use_mock_ai_provider(monkeypatch):
 
 @pytest.fixture
 def db():
-    """创建测试数据库会话"""
+    """Create a test database session."""
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
     try:
@@ -48,7 +52,7 @@ def db():
 
 @pytest.fixture
 def client(db):
-    """创建测试客户端"""
+    """Create a test client."""
     from fastapi.testclient import TestClient
 
     def override_get_db():

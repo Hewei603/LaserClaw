@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from ..auth.acl import assert_case_edit, assert_case_view
+from ..auth.security import Principal, get_current_principal
 from ..config import get_settings
 from ..database import get_db
 from ..knowledge.ingestion import create_attachment_source
@@ -42,11 +44,17 @@ def _safe_upload_path(filename: str) -> tuple[str, str]:
 
 
 @router.post("/cases/{case_id}/attachments", response_model=AttachmentResponse, status_code=status.HTTP_201_CREATED)
-async def upload_attachment(case_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_attachment(
+    case_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Upload an attachment and index extracted text into the knowledge base."""
     case = db.query(ExperimentCase).filter(ExperimentCase.id == case_id).first()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Case {case_id} does not exist")
+    assert_case_edit(db, case, principal)
 
     _, filepath = _safe_upload_path(file.filename or "")
     content = await file.read()
@@ -79,11 +87,18 @@ async def upload_attachment(case_id: int, file: UploadFile = File(...), db: Sess
 
 
 @router.post("/attachments/{attachment_id}/analyze", response_model=dict)
-async def analyze_attachment_image(attachment_id: int, db: Session = Depends(get_db)):
+async def analyze_attachment_image(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Analyze an uploaded case image and save the result as generated content."""
     attachment = db.query(Attachment).filter(Attachment.id == attachment_id).first()
     if not attachment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Attachment {attachment_id} does not exist")
+    case = db.query(ExperimentCase).filter(ExperimentCase.id == attachment.case_id).first()
+    if case:
+        assert_case_edit(db, case, principal)
     ext = os.path.splitext(attachment.filename)[1].lower()
     if ext not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Only image attachments can be analyzed")
@@ -92,7 +107,6 @@ async def analyze_attachment_image(attachment_id: int, db: Session = Depends(get
 
     with open(attachment.filepath, "rb") as handle:
         image_data = handle.read()
-    case = db.query(ExperimentCase).filter(ExperimentCase.id == attachment.case_id).first()
     context = {
         "filename": attachment.filename,
         "mime_type": attachment.file_type,
@@ -124,17 +138,32 @@ async def analyze_attachment_image(attachment_id: int, db: Session = Depends(get
 
 
 @router.get("/cases/{case_id}/attachments", response_model=list[AttachmentResponse])
-async def list_attachments(case_id: int, db: Session = Depends(get_db)):
+async def list_attachments(
+    case_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """List attachments for a case."""
+    case = db.query(ExperimentCase).filter(ExperimentCase.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Case {case_id} does not exist")
+    assert_case_view(db, case, principal)
     return db.query(Attachment).filter(Attachment.case_id == case_id).all()
 
 
 @router.get("/attachments/{attachment_id}")
-async def download_attachment(attachment_id: int, db: Session = Depends(get_db)):
+async def download_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Download an attachment."""
     attachment = db.query(Attachment).filter(Attachment.id == attachment_id).first()
     if not attachment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Attachment {attachment_id} does not exist")
+    case = db.query(ExperimentCase).filter(ExperimentCase.id == attachment.case_id).first()
+    if case:
+        assert_case_view(db, case, principal)
     if not os.path.exists(attachment.filepath):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment file is missing")
     record_audit(db, action="attachment.download", resource_type="attachment", resource_id=str(attachment.id))
@@ -143,11 +172,18 @@ async def download_attachment(attachment_id: int, db: Session = Depends(get_db))
 
 
 @router.delete("/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_attachment(attachment_id: int, db: Session = Depends(get_db)):
+async def delete_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
     """Delete an attachment and its indexed knowledge."""
     attachment = db.query(Attachment).filter(Attachment.id == attachment_id).first()
     if not attachment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Attachment {attachment_id} does not exist")
+    case = db.query(ExperimentCase).filter(ExperimentCase.id == attachment.case_id).first()
+    if case:
+        assert_case_edit(db, case, principal)
     if os.path.exists(attachment.filepath):
         os.remove(attachment.filepath)
     record_audit(db, action="attachment.delete", resource_type="attachment", resource_id=str(attachment.id))
