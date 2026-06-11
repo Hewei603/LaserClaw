@@ -1,0 +1,3 @@
+{"id":"synthetic-safety-001","query":"What PPE is required before optical alignment?","should_answer":true,"expected_source_title_contains":"safety","expected_terms":["PPE"]}
+{"id":"synthetic-optics-001","query":"Which mirror coating should be considered for high-power infrared optics?","should_answer":true,"expected_source_title_contains":"optical","expected_terms":["mirror"]}
+{"id":"synthetic-negative-001","query":"What is the warranty policy for the office coffee machine?","should_answer":false}

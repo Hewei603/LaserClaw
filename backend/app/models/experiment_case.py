@@ -36,3 +36,5 @@ class ExperimentCase(Base):
     generated_contents = relationship("GeneratedContent", back_populates="case", cascade="all, delete-orphan")
     knowledge_sources = relationship("KnowledgeSource", back_populates="case", cascade="all, delete-orphan")
     agent_tasks = relationship("AgentTask", back_populates="case", cascade="all, delete-orphan")
+    case_modules = relationship("CaseModule", back_populates="case", cascade="all, delete-orphan")
+    component_items = relationship("CaseComponentItem", back_populates="case", cascade="all, delete-orphan")

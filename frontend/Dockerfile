@@ -1,18 +1,21 @@
-FROM node:18-alpine
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
-# 复制package文件
 COPY package*.json ./
+RUN npm ci
 
-# 安装依赖
-RUN npm install
-
-# 复制应用代码
 COPY . .
 
-# 暴露端口
+ARG VITE_API_URL=http://127.0.0.1:8000
+ENV VITE_API_URL=$VITE_API_URL
+RUN npm run build
+
+FROM nginx:1.27-alpine
+
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+
 EXPOSE 5173
 
-# 启动开发服务器
-CMD ["npm", "run", "dev", "--", "--host"]
+CMD ["nginx", "-g", "daemon off;"]

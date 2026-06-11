@@ -1,0 +1,84 @@
+services:
+  db:
+    image: pgvector/pgvector:pg15
+    container_name: laserclaw_dev_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-laserclaw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-laserclaw123}
+      POSTGRES_DB: ${POSTGRES_DB:-laserclaw}
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-laserclaw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: laserclaw_dev_backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-laserclaw}:${POSTGRES_PASSWORD:-laserclaw123}@db:5432/${POSTGRES_DB:-laserclaw}
+      UPLOAD_DIR: /app/uploads
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-52428800}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-5}
+      ANTHROPIC_MAX_TOKENS: ${ANTHROPIC_MAX_TOKENS:-2048}
+      ANTHROPIC_TEMPERATURE: ${ANTHROPIC_TEMPERATURE:-0.2}
+      AUTO_CREATE_TABLES: "false"
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+      API_KEY: ${API_KEY:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-sql_json}
+      VECTOR_STORE_DIR: ${DOCKER_VECTOR_STORE_DIR:-/app/vector_store}
+      PGVECTOR_DIMENSION: ${PGVECTOR_DIMENSION:-384}
+      RERANKER_PROVIDER: ${RERANKER_PROVIDER:-none}
+    volumes:
+      - ./backend:/app
+      - backend_dev_uploads:/app/uploads
+      - backend_dev_vector_store:/app/vector_store
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: laserclaw_dev_frontend
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://127.0.0.1:8000}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  postgres_dev_data:
+  backend_dev_uploads:
+  backend_dev_vector_store:

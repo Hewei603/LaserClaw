@@ -1,5 +1,8 @@
 from io import BytesIO
 
+from app.config import get_settings
+from app.knowledge.retrieval import _confidence
+
 
 def _create_case(client):
     response = client.post(
@@ -39,6 +42,20 @@ def test_search_marks_unanswerable_queries_low_confidence(client):
     assert data["no_answer"] is True
     assert data["confidence"] == "low"
     assert data["message"]
+
+
+def test_confidence_rejects_ambiguous_low_margin_results(monkeypatch):
+    monkeypatch.setenv("RETRIEVAL_NEGATIVE_POLICY", "score_and_margin")
+    monkeypatch.setenv("RETRIEVAL_ANSWER_MARGIN_MIN", "0.05")
+    get_settings.cache_clear()
+    try:
+        confidence, no_answer, message = _confidence([(0.20, object()), (0.18, object())])
+    finally:
+        get_settings.cache_clear()
+
+    assert confidence == "low"
+    assert no_answer is True
+    assert "ambiguous" in message
 
 
 def test_attachment_upload_indexes_text(client):

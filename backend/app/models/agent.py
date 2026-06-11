@@ -103,3 +103,49 @@ class AgentToolCall(Base):
 
     task = relationship("AgentTask", back_populates="tool_calls")
     step = relationship("AgentStep", back_populates="tool_calls")
+
+
+class AgentSessionSummary(Base):
+    """Rolling summary for a long-running chat session.
+
+    Compressed once the session exceeds SUMMARY_TRIGGER_MESSAGES. Older
+    messages are distilled into this record so the prompt window stays
+    bounded while key conclusions are preserved.
+    """
+
+    __tablename__ = "agent_session_summaries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("agent_chat_sessions.id"), nullable=False, index=True)
+    summary = Column(Text, nullable=False)
+    message_count = Column(Integer, default=0)
+    last_message_id = Column(Integer, ForeignKey("agent_chat_messages.id"), nullable=True)
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    session = relationship("AgentChatSession")
+
+
+class AgentMemoryItem(Base):
+    """A durable fact, decision, or preference extracted from a chat session.
+
+    Extracted by the provider's summarize_chat call and persisted so that
+    future turns can surface relevant context even after the raw messages
+    have been compressed.
+    """
+
+    __tablename__ = "agent_memory_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("agent_chat_sessions.id"), nullable=True, index=True)
+    case_id = Column(Integer, ForeignKey("experiment_cases.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    memory_type = Column(String(50), default="fact", index=True)
+    content = Column(Text, nullable=False)
+    importance = Column(Integer, default=1, index=True)
+    source_message_id = Column(Integer, ForeignKey("agent_chat_messages.id"), nullable=True)
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    session = relationship("AgentChatSession")

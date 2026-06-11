@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import admin, agent, attachments, cases, collaboration, evals, generation, knowledge, versioning
+from .api import admin, agent, attachments, case_modules, cases, collaboration, evals, generation, knowledge, versioning
 from .config import get_settings
 from .database import Base, engine
 from . import models  # noqa: F401 - register SQLAlchemy models
@@ -44,7 +44,7 @@ async def request_id_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     try:
         response = await call_next(request)
-    except Exception as exc:
+    except Exception:
         logger.exception("Unhandled API error", extra={"request_id": request_id})
         return JSONResponse(status_code=500, content={"detail": "Internal server error", "request_id": request_id})
     response.headers["x-request-id"] = request_id
@@ -54,6 +54,7 @@ async def request_id_middleware(request: Request, call_next):
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 app.include_router(cases.router, prefix="/api/cases", tags=["cases"])
+app.include_router(case_modules.router, prefix="/api/cases", tags=["case-modules"])
 app.include_router(attachments.router, prefix="/api", tags=["attachments"])
 app.include_router(generation.router, prefix="/api/cases", tags=["generation"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["knowledge"])

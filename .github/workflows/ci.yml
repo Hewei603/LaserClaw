@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Lint backend
+        run: cd .. && python -m ruff check backend
+
+      - name: Run backend tests
+        env:
+          AI_PROVIDER: mock
+          EMBEDDING_PROVIDER: local
+          RETRIEVAL_BACKEND: sql_json
+          RERANKER_PROVIDER: none
+          PYTEST_ADDOPTS: ""
+        run: |
+          set +e
+          python -m pytest tests -q > pytest-output.txt 2>&1
+          status=$?
+          cat pytest-output.txt
+          if [ "$status" -ne 0 ]; then
+            python -c "from pathlib import Path; text=Path('pytest-output.txt').read_text(errors='replace')[-8000:]; text=text.replace('%','%25').replace(chr(13),'%0D').replace(chr(10),'%0A'); print(f'::error title=Backend pytest failed::{text}')"
+            exit "$status"
+          fi
+
+      - name: Check SQLite migrations
+        env:
+          DATABASE_URL: sqlite:///./_tmp_migration_check.db
+        run: |
+          python -m alembic upgrade head
+          rm -f _tmp_migration_check.db
+
+      - name: Run backend acceptance extras
+        env:
+          AI_PROVIDER: mock
+          EMBEDDING_PROVIDER: local
+          RETRIEVAL_BACKEND: sql_json
+          RERANKER_PROVIDER: none
+        run: python scripts/acceptance_check.py --skip-tests --skip-frontend
+
+  pgvector:
+    name: pgvector integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: laserclaw
+          POSTGRES_PASSWORD: laserclaw123
+          POSTGRES_DB: laserclaw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U laserclaw"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgresql://laserclaw:laserclaw123@localhost:5432/laserclaw
+        run: python -m alembic upgrade head
+
+      - name: Run pgvector integration tests
+        env:
+          RUN_PGVECTOR_TESTS: "1"
+          DATABASE_URL: postgresql://laserclaw:laserclaw123@localhost:5432/laserclaw
+          RETRIEVAL_BACKEND: pgvector
+          EMBEDDING_PROVIDER: local
+          PGVECTOR_DIMENSION: "384"
+          RERANKER_PROVIDER: none
+          PYTEST_ADDOPTS: ""
+        run: |
+          set +e
+          python -m pytest tests/integration -q > pytest-output.txt 2>&1
+          status=$?
+          cat pytest-output.txt
+          if [ "$status" -ne 0 ]; then
+            python -c "from pathlib import Path; text=Path('pytest-output.txt').read_text(errors='replace')[-8000:]; text=text.replace('%','%25').replace(chr(13),'%0D').replace(chr(10),'%0A'); print(f'::error title=pgvector pytest failed::{text}')"
+            exit "$status"
+          fi
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build

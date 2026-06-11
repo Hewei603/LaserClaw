@@ -148,3 +148,34 @@ class MockProvider(AIProvider):
             "custom": ["validated optical elements"],
         }
         return base + specific.get(cavity_type, specific["custom"])
+
+    async def summarize_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        previous_summary: str | None = None,
+    ) -> Dict[str, Any]:
+        joined = " ".join(item.get("content", "") for item in messages)
+        base = (previous_summary + " " if previous_summary else "")
+        summary = (base + joined)[:1200]
+
+        memories: List[Dict[str, Any]] = []
+        lower = joined.lower()
+        if "no output" in lower or "不出光" in lower or "无输出" in lower:
+            memories.append({
+                "memory_type": "fact",
+                "content": "The user reported a no-output laser cavity issue.",
+                "importance": 3,
+            })
+        if "alignment" in lower or "准直" in lower:
+            memories.append({
+                "memory_type": "fact",
+                "content": "Alignment was discussed during this session.",
+                "importance": 2,
+            })
+        if "safety" in lower or "安全" in lower or "ppe" in lower:
+            memories.append({
+                "memory_type": "constraint",
+                "content": "Safety requirements or PPE were mentioned.",
+                "importance": 2,
+            })
+        return {"summary": summary, "memories": memories}
