@@ -1,7 +1,7 @@
 """Knowledge retrieval services."""
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, contains_eager
 
 from ..config import get_settings
 from sqlalchemy import or_
@@ -177,7 +177,12 @@ def search_knowledge(
     """Search knowledge chunks and persist a retrieval audit record."""
     query_embedding = embed_text(query)
     active_source_filter = or_(KnowledgeSource.governance_status.is_(None), KnowledgeSource.governance_status != "archived")
-    chunk_query = db.query(KnowledgeChunk).join(KnowledgeSource).filter(active_source_filter)
+    chunk_query = (
+        db.query(KnowledgeChunk)
+        .join(KnowledgeSource)
+        .options(contains_eager(KnowledgeChunk.source))
+        .filter(active_source_filter)
+    )
     filters: dict[str, object] = {}
     if allowed_case_ids is not None and case_id is None:
         chunk_query = chunk_query.filter(or_(KnowledgeSource.case_id.is_(None), KnowledgeSource.case_id.in_(allowed_case_ids)))
@@ -275,6 +280,7 @@ def search_case_and_global_knowledge(
     global_query = (
         db.query(KnowledgeChunk)
         .join(KnowledgeSource)
+        .options(contains_eager(KnowledgeChunk.source))
         .filter(KnowledgeSource.case_id.is_(None), active_source_filter)
     )
     global_scored = _vector_store_score_chunks(
@@ -294,6 +300,7 @@ def search_case_and_global_knowledge(
         case_query = (
             db.query(KnowledgeChunk)
             .join(KnowledgeSource)
+            .options(contains_eager(KnowledgeChunk.source))
             .filter(KnowledgeSource.case_id == case_id, active_source_filter)
         )
         case_scored = _vector_store_score_chunks(

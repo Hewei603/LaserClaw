@@ -22,5 +22,10 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        # Discard any partial, uncommitted writes so the connection is not
+        # returned to the pool mid-transaction with a poisoned state.
+        db.rollback()
+        raise
     finally:
         db.close()
