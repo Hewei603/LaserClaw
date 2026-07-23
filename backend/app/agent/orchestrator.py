@@ -175,12 +175,20 @@ async def create_and_run_task(
         db.refresh(task)
         return task
     except Exception:
-        task.status = "failed"
-        for step in steps:
-            if step.status == "pending":
-                step.status = "failed"
-                break
-        record_audit(db, action="agent_task.failed", resource_type="agent_task", resource_id=str(task.id))
+        # Discard every partial write from this run (half-built modules,
+        # component items, generated content, retrieval rows, and the original
+        # flushed task/steps) instead of committing them alongside the failure.
+        db.rollback()
+        failed_task = AgentTask(
+            case_id=case_id,
+            goal=goal,
+            mode=mode,
+            risk_level=risk_level,
+            status="failed",
+        )
+        db.add(failed_task)
+        db.flush()
+        record_audit(db, action="agent_task.failed", resource_type="agent_task", resource_id=str(failed_task.id))
         db.commit()
         raise
 
