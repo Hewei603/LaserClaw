@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..knowledge.ingestion import create_generated_content_source
+from ..inventory.evaluator import evaluate_candidates
 from ..models import AgentStep, AgentTask, CaseModule, ExperimentCase, GeneratedContent
 from ..observability.audit import record_audit
 from ..observability.usage import apply_usage_to_generated
@@ -29,7 +30,7 @@ from .tools import (
 
 logger = logging.getLogger(__name__)
 PHYSICS_MODES = {"cavity_design", "phase_match", "coating_tmm"}
-MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management"} | PHYSICS_MODES
+MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management", "component_match"} | PHYSICS_MODES
 
 
 async def create_and_run_task(
@@ -266,6 +267,20 @@ def _run_module_task(
             f"compute_{module.module_type}",
             {"module_id": module.id, "config": merged_config},
             lambda: run_physics_tool_payload(module.module_type, merged_config),
+        )
+        module.status = output.get("status", "failed")
+        module.result_json = output
+    elif module.module_type == "component_match":
+        # Deterministic L1 inventory evaluation against the case's requirement spec.
+        merged_config = {**((case.parameters or {}).get("component_requirement") or {}),
+                         **(module.config_json or {})}
+        output = record_tool_call(
+            db,
+            task,
+            steps[2].id,
+            "match_components",
+            {"module_id": module.id, "requirement": merged_config},
+            lambda: evaluate_candidates(db, merged_config),
         )
         module.status = output.get("status", "failed")
         module.result_json = output

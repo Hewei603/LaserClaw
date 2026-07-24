@@ -32,8 +32,11 @@ _GENERATE_INTENT = [
     "生成", "帮我写", "帮我做", "帮我生成", "帮我制定", "帮我草拟",
     "给我写", "给我生成", "给我做", "写一个", "写一份", "制定",
     "草拟", "出一份", "出一个", "整理", "总结一下", "做一个", "做一份",
-    # Chinese - design/compute intent for physics tools
+    # Chinese - design/compute/select intent for physics + inventory tools
     "帮我设计", "设计一个", "设计", "帮我算", "算一下", "计算", "帮我仿真", "仿真",
+    "帮我选", "帮我找", "帮我挑", "选出", "挑选", "筛选",
+    # selection verbs fused with their object carry intent by themselves
+    "选元件", "找元件", "挑元件", "选镜", "找镜", "选晶体", "找晶体",
     # English
     "generate", "create", "write", "draft", "make", "produce",
     "give me a", "prepare", "build",
@@ -87,6 +90,11 @@ _CONTENT_KEYWORDS = {
         "镀膜曲线", "反射率曲线", "膜系", "阻带", "镀膜评估", "镀膜能不能用",
         "coating curve", "reflectivity curve", "stopband", "coating analysis", "tmm",
     ],
+    "component_match": [
+        "选元件", "找元件", "挑元件", "匹配元件", "元件匹配", "库存匹配", "库存里", "现有元件",
+        "哪个镜子", "哪块镜子", "哪块晶体", "选镜子", "找镜子",
+        "component match", "match components", "which mirror", "from inventory", "in stock",
+    ],
 }
 
 
@@ -103,7 +111,7 @@ def _route_mode(message: str) -> str:
         return "chat"
 
     for mode in ["stability", "beam_profile", "spectrum", "components", "module_management",
-                 "cavity_design", "phase_match", "coating_tmm",
+                 "cavity_design", "phase_match", "coating_tmm", "component_match",
                  "rezonator", "troubleshooting", "report", "plan"]:
         keywords = _CONTENT_KEYWORDS[mode]
         if any(kw in text for kw in keywords):

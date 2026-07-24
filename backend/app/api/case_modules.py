@@ -24,6 +24,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..knowledge.ingestion import create_generated_content_source
 from ..models import CaseComponentItem, CaseModule, CaseModuleFile, ExperimentCase, GeneratedContent
+from ..inventory.evaluator import evaluate_candidates
 from ..observability.audit import record_audit
 from ..physics.toolkit import run_cavity_design, run_coating_tmm, run_phase_match
 from ..schemas import (
@@ -48,6 +49,7 @@ MODULE_LABELS = {
     "cavity_design": "Cavity design (ABCD)",
     "phase_match": "Phase matching",
     "coating_tmm": "Coating TMM analysis",
+    "component_match": "Component matching (inventory)",
 }
 MODULE_EXTENSIONS = {".zip", ".csv", ".txt", ".tsv", ".json", ".jpg", ".jpeg", ".png", ".bmp", ".pdf", ".npy"}
 
@@ -569,6 +571,10 @@ async def run_case_module(
     elif module.module_type in PHYSICS_MODULE_TYPES:
         case = _get_case_or_404(db, module.case_id)
         result = _run_physics_module(module, case, config)
+    elif module.module_type == "component_match":
+        case = _get_case_or_404(db, module.case_id)
+        merged = {**(case.parameters or {}).get("component_requirement", {}), **(config or {})}
+        result = evaluate_candidates(db, merged)
     elif module.module_type == "components":
         case = _get_case_or_404(db, module.case_id)
         existing = db.query(CaseComponentItem).filter(CaseComponentItem.module_id == module.id).count()
