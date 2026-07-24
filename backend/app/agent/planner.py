@@ -4,7 +4,8 @@ from __future__ import annotations
 
 def build_plan(mode: str) -> list[dict[str, str]]:
     """Return a minimal multi-step plan for the requested Agent mode."""
-    if mode in {"stability", "beam_profile", "spectrum", "components", "module_management"}:
+    if mode in {"stability", "beam_profile", "spectrum", "components", "module_management",
+                "cavity_design", "phase_match", "coating_tmm"}:
         return [
             {
                 "title": "Read case and module context",

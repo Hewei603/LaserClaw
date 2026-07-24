@@ -22,12 +22,14 @@ from .tools import (
     list_case_modules_payload,
     list_generated_contents_payload,
     record_tool_call,
+    run_physics_tool_payload,
     save_generated_content_payload,
     search_payload,
 )
 
 logger = logging.getLogger(__name__)
-MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management"}
+PHYSICS_MODES = {"cavity_design", "phase_match", "coating_tmm"}
+MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management"} | PHYSICS_MODES
 
 
 async def create_and_run_task(
@@ -254,6 +256,19 @@ def _run_module_task(
             "summary": "Agent generated or refreshed the case component list.",
             "item_count": len(output["items"]),
         }
+    elif module.module_type in PHYSICS_MODES:
+        # Deterministic physics compute: case parameters overlaid by module config.
+        merged_config = {**(case.parameters or {}), **(module.config_json or {})}
+        output = record_tool_call(
+            db,
+            task,
+            steps[2].id,
+            f"compute_{module.module_type}",
+            {"module_id": module.id, "config": merged_config},
+            lambda: run_physics_tool_payload(module.module_type, merged_config),
+        )
+        module.status = output.get("status", "failed")
+        module.result_json = output
     else:
         output = record_tool_call(
             db,
