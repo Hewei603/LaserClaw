@@ -23,6 +23,7 @@ def tool_schemas() -> list[dict[str, Any]]:
         {"name": "list_component_items", "description": "List component/procurement items for a case.", "input_schema": {"required": ["case_id"]}},
         {"name": "compute_cavity_design", "description": "Deterministic ABCD/Gaussian cavity analysis or length-scan design (stability, waist, spot sizes, element placement).", "input_schema": {"required": ["R1_mm", "R2_mm"]}},
         {"name": "compute_phase_match", "description": "Deterministic phase-matching solve (SHG/SFG angles, walk-off) for BBO/LBO/KTP/BiBO.", "input_schema": {"required": ["crystal", "lambda1_nm"]}},
+        {"name": "match_components", "description": "Deterministic inventory matching: requirement spec -> per-candidate structured verdicts with dominance frontier.", "input_schema": {"required": ["surfaces"]}},
         {"name": "compute_coating_tmm", "description": "Deterministic thin-film coating evaluation (exact stack, vendor curve, or honest nominal-label archetype).", "input_schema": {"required": []}},
         {"name": "search_knowledge", "description": "Search indexed cases, attachments, and generated content.", "input_schema": {"required": ["query"]}},
         {"name": "search_similar_cases", "description": "Search case sources with similar symptoms and cavity type.", "input_schema": {"required": ["query"]}},
@@ -142,6 +143,7 @@ def create_case_module_payload(db: Session, case: ExperimentCase, module_type: s
         "cavity_design": "Cavity design (ABCD)",
         "phase_match": "Phase matching",
         "coating_tmm": "Coating TMM analysis",
+        "component_match": "Component matching (inventory)",
     }
     normalized_type = "components" if module_type == "module_management" else module_type
     module = CaseModule(
