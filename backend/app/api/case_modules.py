@@ -25,6 +25,7 @@ from ..database import get_db
 from ..knowledge.ingestion import create_generated_content_source
 from ..models import CaseComponentItem, CaseModule, CaseModuleFile, ExperimentCase, GeneratedContent
 from ..observability.audit import record_audit
+from ..physics.toolkit import run_cavity_design, run_coating_tmm, run_phase_match
 from ..schemas import (
     CaseComponentItemCreate,
     CaseComponentItemResponse,
@@ -44,6 +45,9 @@ MODULE_LABELS = {
     "beam_profile": "Beam profile analysis",
     "spectrum": "Spectrum analysis",
     "components": "Case component list",
+    "cavity_design": "Cavity design (ABCD)",
+    "phase_match": "Phase matching",
+    "coating_tmm": "Coating TMM analysis",
 }
 MODULE_EXTENSIONS = {".zip", ".csv", ".txt", ".tsv", ".json", ".jpg", ".jpeg", ".png", ".bmp", ".pdf", ".npy"}
 
@@ -216,6 +220,58 @@ def _analyze_beam_profile(module: CaseModule) -> dict[str, Any]:
     except Exception as exc:
         result["image_metadata_warning"] = str(exc)
     return result
+
+
+PHYSICS_MODULE_TYPES = {"cavity_design", "phase_match", "coating_tmm"}
+
+
+def _load_curve_csv(filepath: str) -> dict[str, Any] | None:
+    """Load a vendor reflectance curve CSV (columns: wavelength_nm, R [, T])."""
+    try:
+        wl: list[float] = []
+        r_vals: list[float] = []
+        t_vals: list[float] = []
+        with open(filepath, encoding="utf-8-sig", newline="") as fh:
+            for row in csv.reader(fh):
+                if len(row) < 2:
+                    continue
+                try:
+                    wl.append(float(row[0]))
+                    r_vals.append(float(row[1]))
+                    if len(row) > 2 and row[2].strip():
+                        t_vals.append(float(row[2]))
+                except ValueError:
+                    continue  # header or malformed row
+        if not wl:
+            return None
+        curve: dict[str, Any] = {"wl_nm": wl, "R": r_vals, "source": os.path.basename(filepath)}
+        if len(t_vals) == len(wl):
+            curve["T"] = t_vals
+        return curve
+    except OSError:
+        return None
+
+
+def _run_physics_module(module: CaseModule, case: ExperimentCase, config: dict[str, Any]) -> dict[str, Any]:
+    """Run one of the deterministic physics tools (in-process, no subprocess).
+
+    The effective config is the case's experiment parameters overlaid by the
+    module's own config, so a case that carries cavity/crystal parameters can be
+    computed without re-entering them per module run.
+    """
+    merged = {**(case.parameters or {}), **(config or {})}
+    if module.module_type == "cavity_design":
+        return run_cavity_design(merged)
+    if module.module_type == "phase_match":
+        return run_phase_match(merged)
+    # coating_tmm: an uploaded CSV input file becomes the vendor curve.
+    if not merged.get("vendor_curve"):
+        curve_file = _first_file(module, {".csv"})
+        if curve_file:
+            curve = _load_curve_csv(curve_file.filepath)
+            if curve:
+                merged["vendor_curve"] = curve
+    return run_coating_tmm(merged)
 
 
 def _run_stability(module: CaseModule, db: Session, config: dict[str, Any]) -> dict[str, Any]:
@@ -510,6 +566,9 @@ async def run_case_module(
         result = _analyze_spectrum(module)
     elif module.module_type == "beam_profile":
         result = _analyze_beam_profile(module)
+    elif module.module_type in PHYSICS_MODULE_TYPES:
+        case = _get_case_or_404(db, module.case_id)
+        result = _run_physics_module(module, case, config)
     elif module.module_type == "components":
         case = _get_case_or_404(db, module.case_id)
         existing = db.query(CaseComponentItem).filter(CaseComponentItem.module_id == module.id).count()

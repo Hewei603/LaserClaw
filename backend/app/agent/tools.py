@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..knowledge.retrieval import results_to_citations, search_case_and_global_knowledge
 from ..models import AgentTask, AgentToolCall, CaseComponentItem, CaseModule, ExperimentCase, GeneratedContent
+from ..physics.toolkit import run_cavity_design, run_coating_tmm, run_phase_match
 
 
 def tool_schemas() -> list[dict[str, Any]]:
@@ -20,6 +21,9 @@ def tool_schemas() -> list[dict[str, Any]]:
         {"name": "create_case_module", "description": "Create a case module for stability, beam, spectrum, or component workflows.", "input_schema": {"required": ["case_id", "module_type"]}},
         {"name": "run_case_module_analysis", "description": "Run a case module analysis or generation workflow.", "input_schema": {"required": ["module_id"]}},
         {"name": "list_component_items", "description": "List component/procurement items for a case.", "input_schema": {"required": ["case_id"]}},
+        {"name": "compute_cavity_design", "description": "Deterministic ABCD/Gaussian cavity analysis or length-scan design (stability, waist, spot sizes, element placement).", "input_schema": {"required": ["R1_mm", "R2_mm"]}},
+        {"name": "compute_phase_match", "description": "Deterministic phase-matching solve (SHG/SFG angles, walk-off) for BBO/LBO/KTP/BiBO.", "input_schema": {"required": ["crystal", "lambda1_nm"]}},
+        {"name": "compute_coating_tmm", "description": "Deterministic thin-film coating evaluation (exact stack, vendor curve, or honest nominal-label archetype).", "input_schema": {"required": []}},
         {"name": "search_knowledge", "description": "Search indexed cases, attachments, and generated content.", "input_schema": {"required": ["query"]}},
         {"name": "search_similar_cases", "description": "Search case sources with similar symptoms and cavity type.", "input_schema": {"required": ["query"]}},
         {"name": "save_generated_content", "description": "Persist an Agent artifact.", "input_schema": {"required": ["case_id", "content_type", "content"]}},
@@ -117,6 +121,17 @@ def list_case_modules_payload(case: ExperimentCase) -> dict[str, Any]:
     }
 
 
+def run_physics_tool_payload(module_type: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Dispatch a physics module type to its deterministic compute adapter."""
+    if module_type == "cavity_design":
+        return run_cavity_design(config)
+    if module_type == "phase_match":
+        return run_phase_match(config)
+    if module_type == "coating_tmm":
+        return run_coating_tmm(config)
+    return {"status": "failed", "message": f"Unknown physics tool '{module_type}'"}
+
+
 def create_case_module_payload(db: Session, case: ExperimentCase, module_type: str, title: str | None = None) -> dict[str, Any]:
     labels = {
         "stability": "Stability measurement",
@@ -124,6 +139,9 @@ def create_case_module_payload(db: Session, case: ExperimentCase, module_type: s
         "spectrum": "Spectrum analysis",
         "components": "Case component list",
         "module_management": "Case module",
+        "cavity_design": "Cavity design (ABCD)",
+        "phase_match": "Phase matching",
+        "coating_tmm": "Coating TMM analysis",
     }
     normalized_type = "components" if module_type == "module_management" else module_type
     module = CaseModule(

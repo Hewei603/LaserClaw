@@ -32,9 +32,12 @@ _GENERATE_INTENT = [
     "生成", "帮我写", "帮我做", "帮我生成", "帮我制定", "帮我草拟",
     "给我写", "给我生成", "给我做", "写一个", "写一份", "制定",
     "草拟", "出一份", "出一个", "整理", "总结一下", "做一个", "做一份",
+    # Chinese - design/compute intent for physics tools
+    "帮我设计", "设计一个", "设计", "帮我算", "算一下", "计算", "帮我仿真", "仿真",
     # English
     "generate", "create", "write", "draft", "make", "produce",
     "give me a", "prepare", "build",
+    "design", "compute", "calculate", "simulate",
 ]
 
 # Content type keywords — what to generate
@@ -72,6 +75,18 @@ _CONTENT_KEYWORDS = {
     "module_management": [
         "模块", "添加模块", "更改模块", "删除模块", "case module",
     ],
+    "cavity_design": [
+        "谐振腔", "腔体设计", "腔设计", "腔长", "稳区", "束腰", "腔内光斑", "摆放位置", "镜距",
+        "cavity design", "resonator design", "cavity length", "waist", "stability range", "mirror spacing",
+    ],
+    "phase_match": [
+        "相位匹配", "匹配角", "倍频角", "切角", "走离", "和频角",
+        "phase match", "phase-matching", "pm angle", "walk-off", "walkoff", "cut angle",
+    ],
+    "coating_tmm": [
+        "镀膜曲线", "反射率曲线", "膜系", "阻带", "镀膜评估", "镀膜能不能用",
+        "coating curve", "reflectivity curve", "stopband", "coating analysis", "tmm",
+    ],
 }
 
 
@@ -87,7 +102,9 @@ def _route_mode(message: str) -> str:
     if not has_intent:
         return "chat"
 
-    for mode in ["stability", "beam_profile", "spectrum", "components", "module_management", "rezonator", "troubleshooting", "report", "plan"]:
+    for mode in ["stability", "beam_profile", "spectrum", "components", "module_management",
+                 "cavity_design", "phase_match", "coating_tmm",
+                 "rezonator", "troubleshooting", "report", "plan"]:
         keywords = _CONTENT_KEYWORDS[mode]
         if any(kw in text for kw in keywords):
             return mode
