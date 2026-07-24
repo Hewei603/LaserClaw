@@ -21,7 +21,6 @@ Run:  cd backend && py scripts/demo_thg_inventory_case.py --inventory <path.xlsx
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -271,7 +270,7 @@ def main() -> None:
     ranked = sorted(candidates, key=lambda c: abs(c[1]["waist_w0_mm"] - 0.25))
     roc_phys, rec_phys, _ = ranked[0]
     print(f"\n物理最优: R=-{roc_phys:.0f} -> L={rec_phys['length_mm']}mm w0={rec_phys['waist_w0_mm']}mm")
-    print(f"  该曲率的库存镀膜核查: ", end="")
+    print("  该曲率的库存镀膜核查: ", end="")
     phys_owners = hr1064_owners(roc_phys)
     if phys_owners:
         print(f"{len(phys_owners)} 行同时满足 1064HR -> 直接可用")
