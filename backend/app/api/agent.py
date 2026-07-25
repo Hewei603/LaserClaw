@@ -35,6 +35,7 @@ _GENERATE_INTENT = [
     # Chinese - design/compute/select intent for physics + inventory tools
     "帮我设计", "设计一个", "设计", "帮我算", "算一下", "计算", "帮我仿真", "仿真",
     "帮我选", "帮我找", "帮我挑", "选出", "挑选", "筛选",
+    "帮我分析", "分析一下", "分析", "拟合", "analyze", "fit",
     # selection verbs fused with their object carry intent by themselves
     "选元件", "找元件", "挑元件", "选镜", "找镜", "选晶体", "找晶体",
     # English
@@ -90,6 +91,10 @@ _CONTENT_KEYWORDS = {
         "镀膜曲线", "反射率曲线", "膜系", "阻带", "镀膜评估", "镀膜能不能用",
         "coating curve", "reflectivity curve", "stopband", "coating analysis", "tmm",
     ],
+    "power_curve": [
+        "功率曲线", "输出功率曲线", "阈值", "斜率效率", "泵浦功率",
+        "power curve", "slope efficiency", "threshold", "input-output", "p-p curve",
+    ],
     "component_match": [
         "选元件", "找元件", "挑元件", "匹配元件", "元件匹配", "库存匹配", "库存里", "现有元件",
         "哪个镜子", "哪块镜子", "哪块晶体", "选镜子", "找镜子",
@@ -111,7 +116,7 @@ def _route_mode(message: str) -> str:
         return "chat"
 
     for mode in ["stability", "beam_profile", "spectrum", "components", "module_management",
-                 "cavity_design", "phase_match", "coating_tmm", "component_match",
+                 "cavity_design", "phase_match", "coating_tmm", "component_match", "power_curve",
                  "rezonator", "troubleshooting", "report", "plan"]:
         keywords = _CONTENT_KEYWORDS[mode]
         if any(kw in text for kw in keywords):

@@ -95,7 +95,7 @@ class GenerateRequest(BaseModel):
 
 
 class CaseModuleCreate(BaseModel):
-    module_type: str = Field(..., pattern="^(stability|beam_profile|spectrum|components|cavity_design|phase_match|coating_tmm|component_match)$")
+    module_type: str = Field(..., pattern="^(stability|beam_profile|spectrum|components|cavity_design|phase_match|coating_tmm|component_match|power_curve)$")
     title: Optional[str] = None
     config_json: Dict[str, Any] = Field(default_factory=dict)
 
@@ -238,7 +238,7 @@ class KnowledgeSearchResponse(BaseModel):
 class AgentTaskCreate(BaseModel):
     case_id: Optional[int] = None
     goal: str = Field(..., min_length=1)
-    mode: str = Field(default="troubleshooting", pattern="^(troubleshooting|plan|report|rezonator|stability|beam_profile|spectrum|components|module_management|cavity_design|phase_match|coating_tmm|component_match)$")
+    mode: str = Field(default="troubleshooting", pattern="^(troubleshooting|plan|report|rezonator|stability|beam_profile|spectrum|components|module_management|cavity_design|phase_match|coating_tmm|component_match|power_curve)$")
     require_citations: bool = True
 
 
@@ -246,7 +246,7 @@ class AgentChatRequest(BaseModel):
     session_id: Optional[int] = None
     message: str = Field(..., min_length=1)
     case_id: Optional[int] = None
-    mode: str = Field(default="auto", pattern="^(auto|chat|troubleshooting|plan|report|rezonator|stability|beam_profile|spectrum|components|module_management|cavity_design|phase_match|coating_tmm|component_match)$")
+    mode: str = Field(default="auto", pattern="^(auto|chat|troubleshooting|plan|report|rezonator|stability|beam_profile|spectrum|components|module_management|cavity_design|phase_match|coating_tmm|component_match|power_curve)$")
     require_citations: bool = True
 
 
