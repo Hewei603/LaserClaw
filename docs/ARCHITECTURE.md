@@ -190,17 +190,20 @@ RAG 管线文件:`knowledge/ingestion.py`(提取/入库)→ `knowledge/chunking.
 (local 稀疏 / openai / sentence-transformers)→ `knowledge/vector_store.py`(sql_json / chroma / pgvector)
 → `knowledge/retrieval.py`(两级检索+置信度+no-answer)→ `knowledge/reranking.py`。
 Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `anthropic.py`,工厂在 `providers/__init__.py`。
+**大陆模型**:`AI_PROVIDER` 可设为 `deepseek` / `qwen`(阿里 DashScope 兼容模式)/ `zhipu`(智谱 GLM)/ `moonshot`(Kimi)——四家均为 OpenAI 兼容端点,复用 `OpenAIProvider` 并注入各自 `base_url`/默认模型;缺少对应 `*_API_KEY` 时自动回退 MockProvider(配置见 `config.py` 与 `.env.example`)。
 
 ---
 
-## 9. 测试与质量门(`backend/tests/`,共 237+ 用例)
+## 9. 测试与质量门(`backend/tests/`,共 267 用例 + 2 skipped)
 
 | 文件 | 覆盖 |
 |---|---|
-| `test_physics_materials/tmm/beam/coating_tool/nonlinear.py` | 物理内核 vs 解析解与文献值 |
+| `test_physics_materials.py` / `test_physics_tmm.py` / `test_physics_beam.py` / `test_physics_coating_tool.py` / `test_physics_nonlinear.py` | 物理内核 vs 解析解与文献值 |
 | `test_physics_tmm_oracle.py` | 与独立 `tmm` 库对拍(dev 依赖,缺库自动跳过) |
-| `test_physics_adversarial_fixes.py` | 对抗审查确认缺陷的回归锁 |
+| `test_physics_adversarial_fixes.py` | 物理内核对抗审查确认缺陷的回归锁 |
+| `test_acceptance_hardening.py` | **验收对抗审查**确认缺陷的回归锁:评估器误判(below_spec / AR 当 HR / 显式冲突优先 / 支配维度)、功率拟合折线选段与告警保真、caird 除零与类型容错、导入器空行与数量 0、解析器尾部波长、上传大小门、.txt/.tsv 加载、非 dict 需求 |
 | `test_physics_modules.py` | 物理工具经 REST 模块 + Agent 任务 + 聊天路由 |
+| `test_power_curve.py` | 功率曲线拟合、跨曲线 Findlay-Clay/Caird、API 往返 |
 | `test_inventory.py` | L0 语法解析、导入、SQL 过滤、L1 三态/硬门/前沿、Agent 路径 |
 | `test_acl.py` / `test_security_hardening.py` | ACL 与提权/越权回归(角色以 DB 为准、evals 租户隔离、失败回滚) |
 | `test_cases/knowledge_agent/generation/agent_memory/...` | 业务 API 全链路 |
@@ -214,6 +217,21 @@ Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `a
 |---|---|
 | `scripts/demo_physics_case.py` | 通用工作流:建 Case → 中文路由 → Agent 任务 → 腔长扫描/相位匹配/镀膜评估 → 引用与审计(内存库+mock LLM,零依赖可跑) |
 | `scripts/demo_thg_inventory_case.py --inventory <xlsx>` | **紫外三倍频 vs 真实库存**:解析工作簿 → 库存约束腔设计 → SHG/THG 角 → 库存 BIBO 切角第一性验证(差 0.1°)→ 库存 LBO 逐块偏差量化 → 缺口/实测清单(库存数据仅入内存,不落盘) |
+
+---
+
+## 10.5 前端(`frontend/src/`)
+
+| 文件 | 职责 |
+|---|---|
+| `App.jsx` | 路由与导航(首页 / Agent / 案例 / 实验室文档 / **元件库**) |
+| `pages/CaseDetail.jsx` | 案例详情:概览(结构化参数表)、生成物(分节渲染 + 原始 JSON 折叠)、知识检索、**模块**(分组下拉 + 每模块独立参数框 + 类型化结果)、Agent 任务轨迹、附件;统一错误横幅 |
+| `components/ModuleResults.jsx` | **类型化结果渲染**:功率曲线 SVG(坐标刻度 + 实测点 + 阈值标记)、多曲线对比与腔损耗、相位匹配表、镀膜三态色块、腔设计摆位表、元件匹配前沿 |
+| `pages/InventoryPage.jsx` | 元件库:xlsx 导入、波长×功能 SQL 级筛选、名称搜索、待复核队列、需求匹配 |
+| `pages/AgentWorkspace.jsx` | Agent 对话:路由结果 / 任务 / 引用 pill |
+| `api/client.js` | axios 封装 + HTTP 状态码中文提示 |
+| `api/inventory.js` | 元件库 API 客户端 |
+| `LanguageContext.jsx` / `i18n.js` | 中英双语;`t()` 文案 + `te()` 后端枚举值翻译(状态/置信度/带位/元件名) |
 
 ---
 
