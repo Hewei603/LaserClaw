@@ -50,6 +50,7 @@ MODULE_LABELS = {
     "phase_match": "Phase matching",
     "coating_tmm": "Coating TMM analysis",
     "component_match": "Component matching (inventory)",
+    "power_curve": "Power transfer curve (threshold & slope)",
 }
 MODULE_EXTENSIONS = {".zip", ".csv", ".txt", ".tsv", ".json", ".jpg", ".jpeg", ".png", ".bmp", ".pdf", ".npy"}
 
@@ -252,6 +253,109 @@ def _load_curve_csv(filepath: str) -> dict[str, Any] | None:
         return curve
     except OSError:
         return None
+
+
+def _load_xy_csv(filepath: str) -> tuple[list[float], list[float]] | None:
+    """Load a two-column numeric CSV/TXT (pump, output); headers skipped."""
+    try:
+        xs: list[float] = []
+        ys: list[float] = []
+        with open(filepath, encoding="utf-8-sig", newline="") as fh:
+            for row in csv.reader(fh, delimiter="," if filepath.lower().endswith(".csv") else None):
+                if isinstance(row, str):
+                    row = row.split()
+                if len(row) < 2:
+                    continue
+                try:
+                    xs.append(float(row[0]))
+                    ys.append(float(row[1]))
+                except ValueError:
+                    continue
+        return (xs, ys) if len(xs) >= 3 else None
+    except OSError:
+        return None
+
+
+def _run_power_curve(module: CaseModule, db: Session, config: dict[str, Any]) -> dict[str, Any]:
+    """Fit a measured output-vs-pump power curve; compare across the case's series.
+
+    Data comes from either an uploaded two-column CSV/TXT input file or inline
+    ``config.data = {"pump": [...], "output": [...]}``.  Tag each series with
+    ``config.output_coupler_T_pct`` to unlock Findlay-Clay / Caird loss analysis
+    across sibling power_curve modules of the same case.
+    """
+    from ..physics.laser_metrics import caird, findlay_clay, fit_power_curve
+
+    inline = config.get("data") or {}
+    pump = inline.get("pump")
+    output = inline.get("output")
+    source: str | None = "inline"
+    if not (pump and output):
+        data_file = _first_file(module, {".csv", ".txt", ".tsv"})
+        if data_file is None:
+            return {"status": "needs_input",
+                    "message": "上传两列数据文件(泵浦功率, 输出功率)或在 config.data 中内联 pump/output 数组。"}
+        loaded = _load_xy_csv(data_file.filepath)
+        if loaded is None:
+            return {"status": "failed", "message": "数据文件无法解析出至少 3 行两列数值。"}
+        pump, output = loaded
+        source = data_file.filename
+
+    fit = fit_power_curve(pump, output)
+    if fit.get("status") != "completed":
+        return fit
+
+    units = {"pump": config.get("pump_unit", "W"), "output": config.get("output_unit", "W")}
+    result: dict[str, Any] = {
+        "status": "completed",
+        "tool": "power_curve",
+        "series_label": config.get("label") or module.title,
+        "output_coupler_T_pct": config.get("output_coupler_T_pct"),
+        "units": units,
+        "data_source": source,
+        "n_points": fit["points_total"],
+        "fit": fit,
+        "summary": (
+            f"阈值 {fit['threshold_pump']} {units['pump']}, "
+            f"斜率效率 {fit['slope_efficiency_pct']}% (R²={fit['r_squared']})"
+        ),
+    }
+
+    # Cross-series comparison within this case (the measurement-feedback loop).
+    siblings = (
+        db.query(CaseModule)
+        .filter(CaseModule.case_id == module.case_id, CaseModule.module_type == "power_curve")
+        .all()
+    )
+    series = []
+    for sib in siblings:
+        res = sib.result_json or {}
+        sib_fit = res.get("fit") or {}
+        entry = {
+            "module_id": sib.id,
+            "label": res.get("series_label") or sib.title,
+            "output_coupler_T_pct": res.get("output_coupler_T_pct"),
+            "threshold_pump": (fit if sib.id == module.id else sib_fit).get("threshold_pump"),
+            "slope_efficiency": (fit if sib.id == module.id else sib_fit).get("slope_efficiency"),
+            "slope_efficiency_pct": (fit if sib.id == module.id else sib_fit).get("slope_efficiency_pct"),
+        }
+        if sib.id == module.id:
+            entry["output_coupler_T_pct"] = config.get("output_coupler_T_pct")
+        if entry["threshold_pump"] is not None:
+            series.append(entry)
+    if len(series) > 1:
+        result["comparison"] = sorted(series, key=lambda s: (s["output_coupler_T_pct"] is None,
+                                                             s["output_coupler_T_pct"] or 0))
+        fc = findlay_clay(series)
+        cd = caird(series)
+        if fc:
+            result["findlay_clay"] = fc
+        if cd:
+            result["caird"] = cd
+        if fc and fc.get("applicable"):
+            result["summary"] += f"; Findlay-Clay 腔内往返损耗 ≈ {fc['round_trip_loss_pct']}%"
+
+    return result
 
 
 def _run_physics_module(module: CaseModule, case: ExperimentCase, config: dict[str, Any]) -> dict[str, Any]:
@@ -575,6 +679,8 @@ async def run_case_module(
         case = _get_case_or_404(db, module.case_id)
         merged = {**(case.parameters or {}).get("component_requirement", {}), **(config or {})}
         result = evaluate_candidates(db, merged)
+    elif module.module_type == "power_curve":
+        result = _run_power_curve(module, db, config)
     elif module.module_type == "components":
         case = _get_case_or_404(db, module.case_id)
         existing = db.query(CaseComponentItem).filter(CaseComponentItem.module_id == module.id).count()

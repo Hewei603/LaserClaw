@@ -30,7 +30,7 @@ from .tools import (
 
 logger = logging.getLogger(__name__)
 PHYSICS_MODES = {"cavity_design", "phase_match", "coating_tmm"}
-MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management", "component_match"} | PHYSICS_MODES
+MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management", "component_match", "power_curve"} | PHYSICS_MODES
 
 
 async def create_and_run_task(
@@ -316,6 +316,7 @@ def _module_needs_inputs_payload(module: CaseModule) -> dict[str, Any]:
         "stability": "Upload a power meter photo ZIP and provide ROI x,y,w,h, then run the stability module.",
         "beam_profile": "Upload a BeamGage JPG/BMP/PNG export, then run the beam profile module.",
         "spectrum": "Upload a spectrum CSV/TXT data file, then run the spectrum module.",
+        "power_curve": "Upload a two-column pump/output power CSV (or set config.data), then run the power curve module.",
     }
     if module.files:
         return {

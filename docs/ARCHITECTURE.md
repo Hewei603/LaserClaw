@@ -60,7 +60,7 @@ LaserClaw 是一个面向激光实验室的本地优先(local-first)实验管理
 | 前缀 | 文件 | 职责 |
 |---|---|---|
 | `/api/cases` | `api/cases.py` | Case CRUD、打包导出(bundle) |
-| `/api/cases`(模块) | `api/case_modules.py` | Case 模块:创建/上传文件/**运行**(稳定性、光谱、光斑、元件清单、**cavity_design / phase_match / coating_tmm / component_match**);运行分发在 `run_case_module` 的 if/elif 链 |
+| `/api/cases`(模块) | `api/case_modules.py` | Case 模块:创建/上传文件/**运行**(稳定性、光谱、光斑、元件清单、**cavity_design / phase_match / coating_tmm / component_match / power_curve**);运行分发在 `run_case_module` 的 if/elif 链。测量数据(功率曲线 CSV、光谱数据与示波器截图、光斑图)以 `CaseModuleFile` 挂在对应模块上 |
 | `/api/cases`(生成) | `api/generation.py` | LLM 生成:计划/排故/报告/ReZonator 草稿(带 RAG 增强) |
 | `/api/attachments` | `api/attachments.py` | Case 附件上传/下载(带 ACL) |
 | `/api/knowledge` | `api/knowledge.py` | 全局知识源上传、治理状态、`/search` 检索(带 ACL 过滤) |
@@ -100,6 +100,7 @@ oracle(GPL,已 gitignore,绝不拷贝)。
 | `physics/beam.py` | ABCD 元件矩阵、高斯 q 传播、往返稳定性、自洽本征模、各面光斑(= ReZonator 级内核) | 对称腔/平凹腔/共焦极限闭式解(`tests/test_physics_beam.py`) |
 | `physics/nonlinear.py` | 单轴+双轴主平面相位匹配(所有偏振配对)、走离 | 文献角度:BBO SHG-I 22.8°、THG 31.3°、LBO 11.4°、BiBO 等(`tests/test_physics_nonlinear.py`) |
 | `physics/toolkit.py` | **工作流适配层**(dict→dict):`run_cavity_design`(定长分析/腔长扫描→稳区→推荐几何+元件摆位)、`run_phase_match`、`run_coating_tmm`;REST 与 Agent 共用 | `tests/test_physics_modules.py` |
+| `physics/laser_metrics.py` | **测量分析**:功率曲线阈值+斜率效率拟合(自动线性区检测)、Findlay-Clay / Caird 跨曲线腔损耗分析 | 合成数据还原真值(`tests/test_power_curve.py`) |
 | `physics/units.py` / `physics/constants.py` | 单位约定(波长 nm、光学长度 mm、膜厚 nm)与常数 | — |
 
 > 曾由对抗式物理审查(5 个独立视角)发现并修复一个关键分支错误(`_cos_theta` 在 n-ik 约定下
