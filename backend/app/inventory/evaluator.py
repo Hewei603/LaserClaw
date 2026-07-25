@@ -42,11 +42,42 @@ def _archetype_indices(wl_nm: float) -> tuple[float, float]:
 
 
 def _coating_family(function: str) -> str:
+    """Family of a *required* function label (requirements carry no thresholds)."""
     if function in _REFLECT:
         return "reflect"
     if function in _TRANSMIT:
         return "transmit"
     return "partial"
+
+
+def implied_reflectivity(band) -> float | None:
+    """Reflectivity (%) implied by a stored band's threshold, or None if unstated.
+
+    ``R>99.5%`` -> 99.5 ; ``R<0.2%`` -> 0.2 (an AR spec!) ; ``T=20%`` -> ~80 ;
+    ``T>90%`` -> ~10.  This is what separates a partial *reflector* from an
+    anti-reflection surface written in threshold form.
+    """
+    if band.value_pct is None or band.value_type is None:
+        return None
+    value = float(band.value_pct)
+    return value if band.value_type.upper() == "R" else 100.0 - value
+
+
+def _band_family(band) -> str:
+    """Family of a *stored* band, using its threshold when the label is ambiguous.
+
+    A bare threshold band is parsed as ``PR``; whether it behaves as a reflector
+    or as an anti-reflection surface depends entirely on the implied
+    reflectivity, so classify by that instead of by the ``PR`` label.
+    """
+    if band.function in _REFLECT:
+        return "reflect"
+    if band.function in _TRANSMIT:
+        return "transmit"
+    implied = implied_reflectivity(band)
+    if implied is None:
+        return "partial"
+    return "partial" if implied >= 50.0 else "transmit"
 
 
 def _judge_band_against_requirement(req: dict, band, tol_nm: float = 8.0) -> dict | None:
@@ -57,23 +88,34 @@ def _judge_band_against_requirement(req: dict, band, tol_nm: float = 8.0) -> dic
     """
     wl = float(req["wavelength_nm"])
     need_family = _coating_family(req["function"].upper())
-    band_family = _coating_family(band.function)
+    band_family = _band_family(band)
 
     covers = band.wl_min_nm - tol_nm <= wl <= band.wl_max_nm + tol_nm
 
     if band_family == need_family or (need_family == "reflect" and band_family == "partial"):
         if covers:
-            status = "design_match"
             detail = f"{band.function}@{band.wl_min_nm:g}-{band.wl_max_nm:g} 覆盖 {wl:g}nm"
             threshold_ok: bool | None = None
             if need_family == "reflect" and req.get("min_R_pct") is not None:
-                if band.value_type == "R" and band.value_pct is not None:
-                    threshold_ok = band.value_pct >= float(req["min_R_pct"])
-                elif band.function == "PR" and band.value_type == "T" and band.value_pct is not None:
-                    threshold_ok = (100.0 - band.value_pct) >= float(req["min_R_pct"])
-                    detail += f" (部分反射 T={band.value_pct:g}% -> R≈{100 - band.value_pct:g}%)"
+                implied = implied_reflectivity(band)
+                if implied is not None:
+                    threshold_ok = implied >= float(req["min_R_pct"])
+                    if band.value_type and band.value_type.upper() == "T":
+                        detail += f" (T={band.value_pct:g}% -> R≈{implied:g}%)"
+            if threshold_ok is False:
+                # Known reflectivity provably below the requirement: a hard fail,
+                # never a design match.
+                return {
+                    "status": "below_spec",
+                    "surface": band.surface,
+                    "detail": (f"{detail};实测/标称反射率 ≈{implied_reflectivity(band):g}% "
+                               f"< 需求 {float(req['min_R_pct']):g}%"),
+                    "threshold_ok": False,
+                    "needs_measurement": False,
+                    "margin_nm": None,
+                }
             return {
-                "status": status,
+                "status": "design_match",
                 "surface": band.surface,
                 "detail": detail,
                 "threshold_ok": threshold_ok,
@@ -133,8 +175,21 @@ def _judge_band_against_requirement(req: dict, band, tol_nm: float = 8.0) -> dic
 
 
 def _judge_coating_requirement(req: dict, item: InventoryItem) -> dict:
-    """Best-surface judgement of one required coating band for an item."""
-    order = {"design_match": 0, "maybe_usable": 1, "unknown": 2, "off": 3, "conflict": 4}
+    """Best-surface judgement of one required coating band for an item.
+
+    Ranking rule: EXPLICIT evidence outranks an archetype guess.  A labelled
+    below-spec reflectivity or an opposite-function band at the exact required
+    wavelength is hard evidence and must not be masked by a ``maybe_usable``
+    that only came from the stopband prior of some other nominal line.
+    """
+    order = {
+        "design_match": 0,   # explicit, covers, meets threshold
+        "below_spec": 1,     # explicit, covers, provably fails threshold
+        "conflict": 2,       # explicit opposite function at this wavelength
+        "maybe_usable": 3,   # archetype prior only
+        "unknown": 4,
+        "off": 5,
+    }
     per_surface: dict[str, list[dict]] = {"S1": [], "S2": []}
     for band in item.coatings:
         j = _judge_band_against_requirement(req, band)
@@ -237,7 +292,7 @@ def evaluate_item(item: InventoryItem, requirement: dict) -> dict:
         j["requirement"] = f"{req['function'].upper()}@{req['wavelength_nm']}nm" + (
             f" (R≥{req['min_R_pct']}%)" if req.get("min_R_pct") is not None else "")
         coating_judgments.append(j)
-        if j["status"] in ("off", "conflict"):
+        if j["status"] in ("off", "conflict", "below_spec"):
             hard.append(f"镀膜不满足 {j['requirement']}: {j['detail']}")
         elif j["status"] == "maybe_usable":
             must_measure.append(f"实测 {j['requirement']} 处的实际 R/T({j['detail'][:40]}...)")
@@ -269,12 +324,24 @@ def evaluate_item(item: InventoryItem, requirement: dict) -> dict:
 
 
 def _dominates(a: dict, b: dict) -> bool:
-    """A dominates B: no worse on every comparable dimension, better on one."""
+    """A dominates B: no worse on every comparable dimension, better on one.
+
+    The dimensions must cover every axis a user would trade off, otherwise a
+    candidate that is better on an unmodelled axis can be wrongly dominated.
+    Spec compliance (stated vs unknown reflectivity) and aperture margin are
+    therefore first-class dimensions alongside coating status, unknown count and
+    curvature deviation.  All dimensions are "lower is better".
+    """
     order = {"design_match": 0, "maybe_usable": 1, "unknown": 2}
 
     def coat_rank(v):
         ranks = [order.get(c["status"], 3) for c in v["parameters"].get("coatings", [])]
         return max(ranks) if ranks else 3
+
+    def threshold_rank(v):
+        # 0 = every required threshold is stated and met, 1 = some unstated.
+        states = [c.get("threshold_ok") for c in v["parameters"].get("coatings", [])]
+        return 0 if states and all(s is True for s in states) else 1
 
     def unknown_count(v):
         return len(v["unknowns"]) + len(v["must_measure"])
@@ -283,8 +350,14 @@ def _dominates(a: dict, b: dict) -> bool:
         roc = v["parameters"].get("roc") or {}
         return roc.get("deviation_pct", 0.0) or 0.0
 
-    dims_a = (coat_rank(a), unknown_count(a), roc_dev(a))
-    dims_b = (coat_rank(b), unknown_count(b), roc_dev(b))
+    def aperture_deficit(v):
+        # smaller is better: 0 when the aperture margin is unknown or generous
+        dia = v["parameters"].get("diameter") or {}
+        margin = dia.get("margin_mm")
+        return 0.0 if margin is None else max(0.0, -float(margin))
+
+    dims_a = (coat_rank(a), threshold_rank(a), unknown_count(a), roc_dev(a), aperture_deficit(a))
+    dims_b = (coat_rank(b), threshold_rank(b), unknown_count(b), roc_dev(b), aperture_deficit(b))
     return all(x <= y for x, y in zip(dims_a, dims_b)) and dims_a != dims_b
 
 

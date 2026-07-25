@@ -78,10 +78,11 @@ function CaseForm() {
       };
       if (isEdit) {
         await casesApi.update(id, payload);
+        navigate(`/cases/${id}`);
       } else {
-        await casesApi.create(payload);
+        const created = await casesApi.create(payload);
+        navigate(`/cases/${created.id}`);
       }
-      navigate('/cases');
     } catch (err) {
       setError(t('caseForm.saveFailed') + err.message);
     } finally {

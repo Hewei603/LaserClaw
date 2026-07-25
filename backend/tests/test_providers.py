@@ -217,3 +217,44 @@ async def test_anthropic_provider_rejects_unsupported_image_mime_type_without_ap
     assert result["error"] == "unsupported_image_mime_type"
     assert result["model_provider"] == "anthropic"
     assert result["model"] == "test-claude"
+
+
+def test_cn_provider_deepseek_uses_openai_client(monkeypatch):
+    from app.config import get_settings
+    from app.providers import get_ai_provider
+
+    monkeypatch.setenv("AI_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
+    get_settings.cache_clear()
+    provider = get_ai_provider()
+    get_settings.cache_clear()
+    assert provider.__class__.__name__ == "OpenAIProvider"
+    assert provider.model == "deepseek-chat"
+    assert "deepseek.com" in provider.base_url
+
+
+def test_cn_provider_without_key_falls_back_to_mock(monkeypatch):
+    from app.config import get_settings
+    from app.providers import get_ai_provider
+
+    for name in ("qwen", "zhipu", "moonshot"):
+        monkeypatch.setenv("AI_PROVIDER", name)
+        monkeypatch.delenv(f"{name.upper()}_API_KEY", raising=False)
+        monkeypatch.delenv("STRICT_PROVIDER", raising=False)
+        get_settings.cache_clear()
+        provider = get_ai_provider()
+        assert provider.__class__.__name__ == "MockProvider", name
+    get_settings.cache_clear()
+
+
+def test_cn_provider_qwen_endpoint(monkeypatch):
+    from app.config import get_settings
+    from app.providers import get_ai_provider
+
+    monkeypatch.setenv("AI_PROVIDER", "qwen")
+    monkeypatch.setenv("QWEN_API_KEY", "test-qw-key")
+    get_settings.cache_clear()
+    provider = get_ai_provider()
+    get_settings.cache_clear()
+    assert "dashscope.aliyuncs.com" in provider.base_url
+    assert provider.model == "qwen-plus"
