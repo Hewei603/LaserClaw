@@ -85,7 +85,8 @@ Return JSON with this shape:
 Return JSON with this shape:
 {
   "cavity_type": "linear|ring|bow-tie|custom",
-  "elements": [{"type": "mirror|crystal|lens|other", "name": "M1", "position": 0}],
+  "elements": [{"type": "mirror|crystal|lens|other", "name": "M1", "position": null}],
+  "position_source": "case data | to be computed by the cavity_design module",
   "assumptions": ["assumption"],
   "rezonator_script_draft": "draft text or pseudocode",
   "validation_checks": ["check"],
@@ -131,8 +132,9 @@ Return JSON with this shape:
   "title": "report title",
   "summary": "brief summary",
   "setup": "setup description",
-  "observations": ["observation or placeholder for measured data"],
-  "analysis": "analysis draft",
+  "observations": ["only what the case data records; say so if nothing recorded"],
+  "hypotheses": ["unverified inference (clearly labelled)"],
+  "analysis": "analysis draft grounded in the recorded data",
   "next_steps": ["next step"],
   "model_provider": "anthropic",
   "model": "model name"
@@ -319,6 +321,12 @@ Return JSON with this shape:
         base = (
             "You are LaserClaw's laser experiment assistant. "
             "Generate practical, safety-conscious advisory content for laser experiment workflows. "
+            "Write every human-readable value in the SAME language as the case "
+            "title/description/goal (Chinese case -> Chinese output). JSON keys stay in English. "
+            "Never invent numeric physics values (lengths, angles, spot sizes, "
+            "reflectivities) or measurements that were not provided: use the case data, "
+            "otherwise say the value must be computed or measured. "
+            "Do not copy the placeholder values shown in the output schema. "
             "Never claim to operate hardware. Return only valid JSON with no markdown or prose outside JSON."
         )
         return f"{base} {extra}".strip()
