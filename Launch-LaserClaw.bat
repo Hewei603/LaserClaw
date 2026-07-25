@@ -26,7 +26,7 @@ set VITE_API_URL=http://127.0.0.1:8000
 
 if exist ".env" (
   echo Loading AI provider settings from .env...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$allowed = @('AI_PROVIDER','OPENAI_API_KEY','OPENAI_MODEL','OPENAI_BASE_URL','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','ANTHROPIC_MAX_TOKENS','ANTHROPIC_TEMPERATURE','STRICT_PROVIDER','REQUIRE_AUTH','API_KEY'); Get-Content '.env' | ForEach-Object { if ($_ -match '^\s*([^#][^=]+?)\s*=\s*(.*)\s*$') { $name = $matches[1].Trim(); $value = $matches[2].Trim(); if ($allowed -contains $name) { 'set ' + [char]34 + $name + '=' + $value + [char]34 } } }" > "%TEMP%\laserclaw_ai_env.cmd"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$allowed = @('AI_PROVIDER','OPENAI_API_KEY','OPENAI_MODEL','OPENAI_BASE_URL','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','ANTHROPIC_MAX_TOKENS','ANTHROPIC_TEMPERATURE','DEEPSEEK_API_KEY','DEEPSEEK_MODEL','DEEPSEEK_BASE_URL','QWEN_API_KEY','QWEN_MODEL','QWEN_BASE_URL','ZHIPU_API_KEY','ZHIPU_MODEL','ZHIPU_BASE_URL','MOONSHOT_API_KEY','MOONSHOT_MODEL','MOONSHOT_BASE_URL','STRICT_PROVIDER','REQUIRE_AUTH','API_KEY'); Get-Content '.env' | ForEach-Object { if ($_ -match '^\s*([^#][^=]+?)\s*=\s*(.*)\s*$') { $name = $matches[1].Trim(); $value = $matches[2].Trim(); if ($allowed -contains $name) { 'set ' + [char]34 + $name + '=' + $value + [char]34 } } }" > "%TEMP%\laserclaw_ai_env.cmd"
   call "%TEMP%\laserclaw_ai_env.cmd"
   del "%TEMP%\laserclaw_ai_env.cmd" >nul 2>nul
 ) else (
