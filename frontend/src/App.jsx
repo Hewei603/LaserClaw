@@ -5,6 +5,7 @@ import CaseDetail from './pages/CaseDetail';
 import CaseForm from './pages/CaseForm';
 import CasesList from './pages/CasesList';
 import Home from './pages/Home';
+import InventoryPage from './pages/InventoryPage';
 import LabDocuments from './pages/LabDocuments';
 import { LanguageProvider, useLanguage } from './LanguageContext';
 import './App.css';
@@ -22,6 +23,7 @@ function NavBar() {
           <Link to="/cases">{t('nav.cases')}</Link>
           <Link to="/cases/new">{t('nav.newCase')}</Link>
           <Link to="/lab-documents">{t('nav.labDocs')}</Link>
+          <Link to="/inventory">{t('nav.inventory')}</Link>
           <button
             className="lang-toggle"
             onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
@@ -54,6 +56,7 @@ function App() {
               <Route path="/cases/:id" element={<CaseDetail />} />
               <Route path="/cases/:id/edit" element={<CaseForm />} />
               <Route path="/lab-documents" element={<LabDocuments />} />
+              <Route path="/inventory" element={<InventoryPage />} />
             </Routes>
           </main>
           <footer className="footer">

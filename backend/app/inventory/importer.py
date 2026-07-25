@@ -121,7 +121,8 @@ def _build_item(
         cut_axis=geo.cut_axis,
         doping_pct=geo.doping_pct,
         material=_material_from_name(name),
-        quantity=_to_float(quantity) or 1.0,
+        # a genuine 0 must survive; only a blank/unparseable cell defaults to 1
+        quantity=1.0 if _to_float(quantity) is None else _to_float(quantity),
         location=location or None,
         keeper=keeper or None,
         vendor=vendor or None,
@@ -180,13 +181,17 @@ def import_workbook(db: Session, path: str | Path, *, source_file: str | None = 
         if idx == 0:
             continue
         report.total_rows += 1
-        name = _cell(row, 1) or last_name
-        size = _cell(row, 4) or last_size
+        raw_name = _cell(row, 1)
         s1, s2 = _cell(row, 2), _cell(row, 3)
         roc = _cell(row, 5)
-        if not any([name, s1, s2, roc]):
+        # Test the RAW cells: with forward-fill, `name` is non-empty from the
+        # second row on, so an interior blank separator row would otherwise be
+        # imported as a phantom duplicate of the previous item.
+        if not any([raw_name, s1, s2, roc, _cell(row, 4), _cell(row, 6)]):
             report.skipped_empty += 1
             continue
+        name = raw_name or last_name
+        size = _cell(row, 4) or last_size
         last_name, last_size = name, size
         _build_item(
             db, report,

@@ -28,16 +28,24 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response) {
+      const statusHints = {
+        400: '请求内容有误，请检查填写内容',
+        401: '未授权，请检查登录状态或 API Key',
+        403: '当前账号权限不足',
+        404: '请求的内容不存在',
+        422: '填写内容的格式不正确，请检查输入',
+        500: '服务器内部错误，请稍后再试',
+        502: 'AI 服务暂时不可用，请稍后再试',
+      };
+      const hint = statusHints[error.response.status];
       const detail = formatErrorDetail(error.response.data?.detail || error.response.statusText);
-      return Promise.reject(new Error(`${error.response.status}: ${detail}`));
+      console.error('API error', error.response.status, detail);
+      return Promise.reject(new Error(hint ? `${hint}（${detail}）` : `${error.response.status}: ${detail}`));
     }
 
     if (error.request) {
-      return Promise.reject(
-        new Error(
-          `Cannot reach LaserClaw API at ${API_BASE_URL}. Check that the backend is running and CORS allows this browser origin.`,
-        ),
-      );
+      console.error('API unreachable', API_BASE_URL);
+      return Promise.reject(new Error(`无法连接后端服务（${API_BASE_URL}），请确认后端已启动。`));
     }
 
     return Promise.reject(new Error(error.message || 'Unexpected API error'));

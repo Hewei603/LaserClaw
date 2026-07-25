@@ -19,10 +19,24 @@ class Settings(BaseSettings):
     max_upload_size: int = 52428800  # 50MB
 
     # AI provider settings
-    ai_provider: str = "mock"  # mock, openai, anthropic
+    ai_provider: str = "mock"  # mock, openai, anthropic, deepseek, qwen, zhipu, moonshot
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
     openai_base_url: Optional[str] = None
+    # Mainland-China OpenAI-compatible providers (reuse the OpenAI client with
+    # each vendor's endpoint; set the matching *_API_KEY to enable).
+    deepseek_api_key: Optional[str] = None
+    deepseek_model: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    qwen_api_key: Optional[str] = None  # Alibaba DashScope compatible mode
+    qwen_model: str = "qwen-plus"
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    zhipu_api_key: Optional[str] = None  # Zhipu GLM open platform
+    zhipu_model: str = "glm-4-plus"
+    zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    moonshot_api_key: Optional[str] = None  # Moonshot Kimi
+    moonshot_model: str = "moonshot-v1-8k"
+    moonshot_base_url: str = "https://api.moonshot.cn/v1"
     anthropic_api_key: Optional[str] = None
     anthropic_model: str = "claude-sonnet-4-5"
     anthropic_max_tokens: int = 2048

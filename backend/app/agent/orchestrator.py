@@ -272,7 +272,8 @@ def _run_module_task(
         module.result_json = output
     elif module.module_type == "component_match":
         # Deterministic L1 inventory evaluation against the case's requirement spec.
-        merged_config = {**((case.parameters or {}).get("component_requirement") or {}),
+        stored_req = (case.parameters or {}).get("component_requirement")
+        merged_config = {**(stored_req if isinstance(stored_req, dict) else {}),
                          **(module.config_json or {})}
         output = record_tool_call(
             db,

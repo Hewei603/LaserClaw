@@ -187,16 +187,27 @@ def parse_coating(text: str, surface: str) -> ParsedCoating:
             if not (_wl_ok(lo) and _wl_ok(hi)):
                 continue
             following = [f for pos, f in func_positions if pos >= m.end()]
-            if following:
+            preceding = [f for pos, f in func_positions if pos < m.start()]
+            # Prefer the next function token ("1064 808 885HT"); fall back to the
+            # previous one for wavelengths trailing the last token
+            # ("AR@1064 1053 1047"), which otherwise vanish silently.
+            adopted = following[0] if following else (preceding[-1] if preceding else None)
+            if adopted:
                 out.bands.append(CoatingBand(
                     surface=surface, wl_min_nm=lo, wl_max_nm=hi,
-                    function=following[0],
+                    function=adopted,
                     raw_fragment=clause_raw[:250],
                 ))
                 claim(m)
                 found_here = True
 
-        if not found_here and re.search(r"\d{3,4}", clause_raw):
+        # Any wavelength left unclaimed is reported, never silently dropped.
+        leftovers = [m.group(0) for m in re.finditer(_BAND, clause_raw)
+                     if is_free(m) and _wl_ok(float(m.group(1)))]
+        if leftovers:
+            out.confidence = "partial"
+            out.notes.append(f"unclaimed wavelengths: {', '.join(leftovers[:6])}")
+        elif not found_here and re.search(r"\d{3,4}", clause_raw):
             out.confidence = "partial"
             out.notes.append(f"unparsed: {clause_raw[:60]}")
 

@@ -41,6 +41,13 @@ function Home() {
               <div className="home-side-card-desc">{t('home.labDocsDesc')}</div>
             </div>
           </Link>
+          <Link to="/inventory" className="home-side-card">
+            <span className="home-side-card-icon">🔍</span>
+            <div>
+              <div className="home-side-card-title">{t('home.inventoryTitle')}</div>
+              <div className="home-side-card-desc">{t('home.inventoryDesc')}</div>
+            </div>
+          </Link>
         </div>
       </div>
 

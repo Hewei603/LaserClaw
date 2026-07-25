@@ -255,24 +255,36 @@ def _load_curve_csv(filepath: str) -> dict[str, Any] | None:
         return None
 
 
+def _split_data_line(line: str) -> list[str]:
+    """Split one data line on comma, tab, semicolon, or whitespace."""
+    for sep in (",", "\t", ";"):
+        if sep in line:
+            return [part.strip() for part in line.split(sep)]
+    return line.split()
+
+
 def _load_xy_csv(filepath: str) -> tuple[list[float], list[float]] | None:
-    """Load a two-column numeric CSV/TXT (pump, output); headers skipped."""
+    """Load a two-column numeric data file (pump, output); headers skipped.
+
+    Accepts .csv/.tsv/.txt with comma, tab, semicolon, or whitespace separators
+    (all are advertised upload formats), so the delimiter is detected per line
+    rather than assumed from the extension.
+    """
     try:
         xs: list[float] = []
         ys: list[float] = []
         with open(filepath, encoding="utf-8-sig", newline="") as fh:
-            for row in csv.reader(fh, delimiter="," if filepath.lower().endswith(".csv") else None):
-                if isinstance(row, str):
-                    row = row.split()
-                if len(row) < 2:
+            for line in fh:
+                parts = _split_data_line(line.strip())
+                if len(parts) < 2:
                     continue
                 try:
-                    xs.append(float(row[0]))
-                    ys.append(float(row[1]))
+                    xs.append(float(parts[0]))
+                    ys.append(float(parts[1]))
                 except ValueError:
-                    continue
+                    continue  # header or malformed row
         return (xs, ys) if len(xs) >= 3 else None
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
 
 
@@ -285,6 +297,16 @@ def _run_power_curve(module: CaseModule, db: Session, config: dict[str, Any]) ->
     across sibling power_curve modules of the same case.
     """
     from ..physics.laser_metrics import caird, findlay_clay, fit_power_curve
+
+    def _coupler_pct(value: Any) -> float | None:
+        """Coerce a user-supplied output-coupler transmission to 0-100, else None."""
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            pct = float(value)
+        except (TypeError, ValueError):
+            return None
+        return pct if 0.0 <= pct <= 100.0 else None
 
     inline = config.get("data") or {}
     pump = inline.get("pump")
@@ -306,11 +328,16 @@ def _run_power_curve(module: CaseModule, db: Session, config: dict[str, Any]) ->
         return fit
 
     units = {"pump": config.get("pump_unit", "W"), "output": config.get("output_unit", "W")}
+    # keep a (downsampled) copy of the measured points so the UI can plot them
+    step = max(1, len(pump) // 120)
+    points = {"pump": [round(float(p), 4) for p in pump[::step]],
+              "output": [round(float(o), 4) for o in output[::step]]}
     result: dict[str, Any] = {
         "status": "completed",
         "tool": "power_curve",
+        "data": points,
         "series_label": config.get("label") or module.title,
-        "output_coupler_T_pct": config.get("output_coupler_T_pct"),
+        "output_coupler_T_pct": _coupler_pct(config.get("output_coupler_T_pct")),
         "units": units,
         "data_source": source,
         "n_points": fit["points_total"],
@@ -334,18 +361,18 @@ def _run_power_curve(module: CaseModule, db: Session, config: dict[str, Any]) ->
         entry = {
             "module_id": sib.id,
             "label": res.get("series_label") or sib.title,
-            "output_coupler_T_pct": res.get("output_coupler_T_pct"),
+            "output_coupler_T_pct": _coupler_pct(res.get("output_coupler_T_pct")),
             "threshold_pump": (fit if sib.id == module.id else sib_fit).get("threshold_pump"),
             "slope_efficiency": (fit if sib.id == module.id else sib_fit).get("slope_efficiency"),
             "slope_efficiency_pct": (fit if sib.id == module.id else sib_fit).get("slope_efficiency_pct"),
         }
         if sib.id == module.id:
-            entry["output_coupler_T_pct"] = config.get("output_coupler_T_pct")
+            entry["output_coupler_T_pct"] = _coupler_pct(config.get("output_coupler_T_pct"))
         if entry["threshold_pump"] is not None:
             series.append(entry)
     if len(series) > 1:
         result["comparison"] = sorted(series, key=lambda s: (s["output_coupler_T_pct"] is None,
-                                                             s["output_coupler_T_pct"] or 0))
+                                                             s["output_coupler_T_pct"] or 0.0))
         fc = findlay_clay(series)
         cd = caird(series)
         if fc:
@@ -419,7 +446,13 @@ def _run_stability(module: CaseModule, db: Session, config: dict[str, Any]) -> d
         "--ylabel",
         str(config.get("ylabel", "Power")),
     ]
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=300)
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "failed",
+            "message": "PowerMeterReader timed out after 300 s; check the input archive and ROI.",
+        }
     if completed.returncode != 0:
         return {
             "status": "failed",
@@ -677,7 +710,8 @@ async def run_case_module(
         result = _run_physics_module(module, case, config)
     elif module.module_type == "component_match":
         case = _get_case_or_404(db, module.case_id)
-        merged = {**(case.parameters or {}).get("component_requirement", {}), **(config or {})}
+        stored_req = (case.parameters or {}).get("component_requirement")
+        merged = {**(stored_req if isinstance(stored_req, dict) else {}), **(config or {})}
         result = evaluate_candidates(db, merged)
     elif module.module_type == "power_curve":
         result = _run_power_curve(module, db, config)

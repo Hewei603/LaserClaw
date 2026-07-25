@@ -43,10 +43,16 @@ async def import_inventory(
     if not (file.filename or "").lower().endswith(".xlsx"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only .xlsx workbooks are supported")
 
+    content = await file.read()
+    if len(content) > settings.max_upload_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds max upload size ({settings.max_upload_size} bytes)",
+        )
+
     upload_dir = Path(settings.upload_dir) / "inventory"
     upload_dir.mkdir(parents=True, exist_ok=True)
     stored = upload_dir / f"{uuid.uuid4().hex}.xlsx"
-    content = await file.read()
     stored.write_bytes(content)
 
     source_name = os.path.basename(file.filename or "inventory.xlsx")
@@ -54,9 +60,11 @@ async def import_inventory(
         db.query(InventoryItem).filter(InventoryItem.source_file == source_name).delete()
         report = import_workbook(db, stored, source_file=source_name)
     except RuntimeError as exc:
+        stored.unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc))
     except Exception as exc:
         db.rollback()
+        stored.unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Import failed: {exc}")
 
     record_audit(
