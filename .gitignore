@@ -61,3 +61,5 @@ alembic/versions/*.pyc
 # ReZonator 2 reference source (GPL — reference/verification oracle ONLY, never commit)
 rezonator2-master/
 rezonator2/
+.env.bak
+.env.*.bak

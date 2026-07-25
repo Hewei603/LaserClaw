@@ -79,13 +79,18 @@ Return JSON with exactly these fields:
             "ReZonator simulation draft",
             case_data,
             """
+This is a SETUP DRAFT, not a computed design. Do NOT invent cavity lengths,
+spacings or spot sizes: put a value only when it is present in the case data,
+otherwise use null and say it must come from the cavity_design module.
+
 Return JSON with exactly these fields:
 {
   "cavity_type": "linear|ring|bow-tie|custom",
-  "components": ["HR mirror", "Nd:YAG crystal", "OC mirror"],
-  "distances": {"component_to_component_mm": 50},
-  "crystal_position": "description of crystal position in cavity",
-  "parameters_to_scan": ["cavity_length", "OC_reflectivity"],
+  "components": ["component names in beam order"],
+  "distances": {"<segment name>": null},
+  "distances_source": "case data | to be computed by the cavity_design module",
+  "crystal_position": "qualitative placement description, no invented numbers",
+  "parameters_to_scan": ["parameter to sweep in simulation"],
   "simulation_notes": "notes for ReZonator simulation setup"
 }
 """,
@@ -118,14 +123,21 @@ Return JSON with exactly these fields:
             "laser experiment report draft",
             case_data,
             """
+"observations" and "data_summary" are a LAB RECORD: state ONLY what the case
+data actually contains (measurements, symptoms, module results). Never invent a
+reading, temperature or spot position that was not provided. Put anything you
+infer under "hypotheses" and mark it as unverified; if no data was recorded, say
+so explicitly.
+
 Return JSON with exactly these fields:
 {
   "title": "report title",
   "background": "background and motivation for the experiment",
   "method": "experimental method and procedure",
-  "observations": "key observations during the experiment",
-  "data_summary": "summary of collected data and measurements",
-  "conclusion": "conclusions drawn from the experiment",
+  "observations": "only what the case data records; say so if nothing recorded",
+  "data_summary": "summary of the provided measurements only",
+  "hypotheses": ["unverified inference (clearly labelled)"],
+  "conclusion": "conclusions supported by the recorded data",
   "next_steps": ["recommended next step 1", "recommended next step 2"]
 }
 """,
@@ -173,6 +185,12 @@ Return JSON with this shape:
             "You are LaserClaw's laser experiment assistant. "
             "Generate practical, safety-conscious content for laser cavity experiments. "
             "Keep the response concise. "
+            "Write every human-readable value in the SAME language as the case "
+            "title/description/goal (Chinese case -> Chinese output). JSON keys stay in English. "
+            "Never invent numeric physics values (lengths, angles, spot sizes, "
+            "reflectivities): use values given in the case data, otherwise say they "
+            "must be computed or measured. "
+            "Do not copy the placeholder numbers shown in the output schema. "
             "Return only valid JSON. Do not include markdown or extra prose."
         )
 
