@@ -66,3 +66,6 @@ rezonator2-master/
 rezonator2/
 .env.bak
 .env.*.bak
+
+# Claude Code local tooling (dev-server config, not project source)
+.claude/

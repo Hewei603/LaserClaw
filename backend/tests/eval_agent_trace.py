@@ -86,17 +86,22 @@ def case_id(client_with_db):
 
 
 @pytest.fixture
-def client_with_db(db_session):
-    """Return (TestClient, db_session) tuple."""
+def client_with_db(db):
+    """Return (TestClient, session) tuple.
+
+    The session fixture in conftest is named ``db``; this file asked for a
+    non-existent ``db_session``, so every test here errored out on collection
+    and the trace-completeness metric it produces had no working producer.
+    """
     def override_get_db():
         try:
-            yield db_session
+            yield db
         finally:
             pass
 
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as tc:
-        yield tc, db_session
+        yield tc, db
     app.dependency_overrides.clear()
 
 
