@@ -28,7 +28,7 @@ LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows*
 - **Project-level ACL** across cases, knowledge search, attachments, generation, Agent tasks, case modules, and bundle export.
 - **RAG evals and benchmarks** for retrieval quality, latency, indexing throughput, and JSON reliability.
 - **Retrieval backends** including deterministic `sql_json`, Chroma, pgvector, and optional cross-encoder reranking.
-- **Provider support** for MockProvider, OpenAI-compatible Chat Completions, and Anthropic.
+- **Provider support** for MockProvider, OpenAI-compatible Chat Completions (OpenAI, DeepSeek, Qwen/DashScope, Zhipu GLM, Moonshot Kimi), and Anthropic.
 - **Bilingual UI** with English and Chinese language switching.
 
 ## Architecture
@@ -140,9 +140,13 @@ Known benchmark limitations:
 
 ## Quick Start on Windows
 
+**Prerequisites** (install once): [Python 3.11+](https://www.python.org/downloads/) (check "Add python.exe to PATH") and [Node.js 22 LTS](https://nodejs.org/).
+
 ```bat
 Launch-LaserClaw.bat
 ```
+
+The first run auto-creates a `.env` config (demo mode). For the day-to-day Chinese user guide see [docs/GUIDE_V2.md](docs/GUIDE_V2.md).
 
 The launcher installs backend/frontend dependencies and starts:
 

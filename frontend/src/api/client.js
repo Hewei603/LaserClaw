@@ -33,9 +33,12 @@ apiClient.interceptors.response.use(
         401: '未授权，请检查登录状态或 API Key',
         403: '当前账号权限不足',
         404: '请求的内容不存在',
+        413: '文件太大，超过了上传上限（50MB）',
         422: '填写内容的格式不正确，请检查输入',
         500: '服务器内部错误，请稍后再试',
-        502: 'AI 服务暂时不可用，请稍后再试',
+        501: '服务端缺少该功能所需的依赖，请联系维护者',
+        502: 'AI 服务返回错误',
+        503: '服务暂时不可用，请稍后再试',
       };
       const hint = statusHints[error.response.status];
       const detail = formatErrorDetail(error.response.data?.detail || error.response.statusText);

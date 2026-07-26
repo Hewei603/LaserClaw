@@ -39,15 +39,15 @@ async def import_inventory(
     refresh), keeping other sources untouched.
     """
     if not can_manage_knowledge(principal):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or reviewer role required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要 reviewer 或 admin 权限")
     if not (file.filename or "").lower().endswith(".xlsx"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only .xlsx workbooks are supported")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 .xlsx 工作簿(请用 Excel 另存为 .xlsx)")
 
     content = await file.read()
     if len(content) > settings.max_upload_size:
         raise HTTPException(
             status_code=413,
-            detail=f"File exceeds max upload size ({settings.max_upload_size} bytes)",
+            detail=f"文件超过大小上限({settings.max_upload_size // (1024 * 1024)} MB)",
         )
 
     upload_dir = Path(settings.upload_dir) / "inventory"
@@ -61,11 +61,17 @@ async def import_inventory(
         report = import_workbook(db, stored, source_file=source_name)
     except RuntimeError as exc:
         stored.unlink(missing_ok=True)
-        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                            detail=f"服务端缺少解析依赖:{exc}")
     except Exception as exc:
         db.rollback()
         stored.unlink(missing_ok=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Import failed: {exc}")
+        reason = str(exc)
+        if "not a zip file" in reason.lower():
+            # openpyxl's BadZipFile leaks "zip" jargon at someone who uploaded
+            # what they believe is an Excel file — explain in their terms.
+            reason = "文件不是有效的 xlsx 工作簿(可能是改了扩展名的文本/旧版 xls 文件,请用 Excel 另存为 .xlsx)"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"导入失败:{reason}")
 
     record_audit(
         db,
@@ -78,6 +84,57 @@ async def import_inventory(
     )
     db.commit()
     return InventoryImportResponse(source_file=source_name, **report.as_dict())
+
+
+@router.delete("/items")
+async def clear_inventory(
+    source_file: str | None = None,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Delete inventory rows — all of them, or one import batch by source file.
+
+    Without this, a re-import under a slightly different filename ("镜片统计-
+    修正版.xlsx") silently doubles the inventory and permanently pollutes every
+    later component match, with no recovery path in the UI.
+    """
+    if not can_manage_knowledge(principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要 reviewer 或 admin 权限")
+    query = db.query(InventoryItem)
+    if source_file:
+        query = query.filter(InventoryItem.source_file == source_file)
+    # ORM-level deletes so the CoatingSpec cascade ("all, delete-orphan") runs.
+    items = query.all()
+    for item in items:
+        db.delete(item)
+    record_audit(
+        db,
+        action="inventory.clear",
+        resource_type="inventory",
+        resource_id=source_file or "all",
+        actor=principal.actor,
+        user_id=principal.user_id,
+        metadata={"deleted_items": len(items)},
+    )
+    db.commit()
+    return {"deleted_items": len(items), "source_file": source_file}
+
+
+@router.get("/sources")
+async def list_sources(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Distinct import batches (source file + row count), for selective cleanup."""
+    _ = principal
+    from sqlalchemy import func
+
+    rows = (
+        db.query(InventoryItem.source_file, func.count(InventoryItem.id))
+        .group_by(InventoryItem.source_file)
+        .all()
+    )
+    return [{"source_file": name or "(未记录)", "items": count} for name, count in rows]
 
 
 @router.get("/items", response_model=list[InventoryItemResponse])

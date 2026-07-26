@@ -73,4 +73,8 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    # The provider block lets the frontend show a "demo mode" banner: mock
+    # output reads like real output, so the user must be told which is running.
+    from .providers import provider_status
+
+    return {"status": "healthy", "provider": provider_status()}

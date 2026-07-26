@@ -132,6 +132,26 @@ class Settings(BaseSettings):
     def _pin_to_repo(cls, value: str) -> str:
         return _resolve_data_path(value)
 
+    @field_validator("database_url")
+    @classmethod
+    def _pin_sqlite_to_backend(cls, value: str) -> str:
+        """A relative sqlite path must not depend on the CWD.
+
+        `sqlite:///./laserclaw.db` resolves to a DIFFERENT database depending on
+        where uvicorn/alembic was started — the historical data lives in
+        backend/laserclaw.db (launcher and alembic both run from backend/), so
+        every start location is normalized to that file. Absolute paths,
+        :memory: and non-sqlite URLs pass through untouched.
+        """
+        prefix = "sqlite:///"
+        if not value.startswith(prefix) or _IN_CONTAINER:
+            return value
+        raw = value[len(prefix):]
+        if not raw or raw == ":memory:" or Path(raw).is_absolute():
+            return value
+        resolved = (_REPO_ROOT / "backend" / raw).resolve()
+        return prefix + resolved.as_posix()
+
     model_config = ConfigDict(env_file=_ENV_FILES, extra="ignore")
 
 

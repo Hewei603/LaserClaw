@@ -84,7 +84,7 @@ def _module_upload_path(module_id: int, filename: str) -> tuple[str, str]:
     if ext not in MODULE_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported module file type. Allowed: {', '.join(sorted(MODULE_EXTENSIONS))}",
+            detail=f"不支持的文件类型,可用:{', '.join(sorted(MODULE_EXTENSIONS))}",
         )
     safe_name = f"{uuid.uuid4()}{ext}"
     root = os.path.abspath(os.path.join(settings.upload_dir, "case_modules", str(module_id)))
@@ -151,14 +151,14 @@ def _save_module_generated_content(db: Session, module: CaseModule, result: dict
 def _analyze_spectrum(module: CaseModule) -> dict[str, Any]:
     data_file = _first_file(module, {".csv", ".txt", ".tsv"})
     if not data_file:
-        return {"status": "needs_input", "message": "Upload a spectrum data CSV/TXT file before running analysis."}
+        return {"status": "needs_input", "message": "请先上传光谱数据文件(CSV/TXT),再运行分析。"}
 
     delimiter = "\t" if os.path.splitext(data_file.filename)[1].lower() == ".tsv" else ","
     with open(data_file.filepath, "r", encoding="utf-8", errors="ignore") as handle:
         sample = handle.read()
     rows = list(csv.reader(StringIO(sample), delimiter=delimiter))
     if len(rows) < 2:
-        return {"status": "failed", "message": "Spectrum file does not contain enough rows."}
+        return {"status": "failed", "message": "光谱文件的数据行数不足,请检查文件内容。"}
 
     header = [cell.strip().lower() for cell in rows[0]]
     x_index = next((i for i, name in enumerate(header) if any(key in name for key in ["wave", "lambda", "nm"])), 0)
@@ -170,7 +170,7 @@ def _analyze_spectrum(module: CaseModule) -> dict[str, Any]:
         except (ValueError, IndexError):
             continue
     if not points:
-        return {"status": "failed", "message": "No numeric wavelength/intensity rows were found."}
+        return {"status": "failed", "message": "没有找到数值型的(波长, 强度)数据行,请检查文件格式。"}
 
     peak_wavelength, peak_intensity = max(points, key=lambda item: item[1])
     total = sum(max(y, 0.0) for _, y in points)
@@ -197,7 +197,7 @@ def _analyze_spectrum(module: CaseModule) -> dict[str, Any]:
 def _analyze_beam_profile(module: CaseModule) -> dict[str, Any]:
     image_file = _first_file(module, {".jpg", ".jpeg", ".png", ".bmp"})
     if not image_file:
-        return {"status": "needs_input", "message": "Upload a BeamGage JPG/BMP/PNG export before running analysis."}
+        return {"status": "needs_input", "message": "请先上传 BeamGage 导出的 JPG/BMP/PNG 光斑图,再运行分析。"}
     result: dict[str, Any] = {
         "status": "completed",
         "input_file_id": image_file.id,
@@ -410,7 +410,7 @@ def _run_physics_module(module: CaseModule, case: ExperimentCase, config: dict[s
 def _run_stability(module: CaseModule, db: Session, config: dict[str, Any]) -> dict[str, Any]:
     zip_file = _first_file(module, {".zip"})
     if not zip_file:
-        return {"status": "needs_input", "message": "Upload a ZIP of power meter photos before running stability analysis."}
+        return {"status": "needs_input", "message": "请先上传功率计照片的 ZIP 压缩包,再运行稳定性分析。"}
 
     roi = config.get("roi")
     if isinstance(roi, str):
@@ -420,13 +420,13 @@ def _run_stability(module: CaseModule, db: Session, config: dict[str, Any]) -> d
     else:
         return {
             "status": "needs_roi",
-            "message": "Provide ROI as x,y,w,h. Automatic ROI detection is planned, but manual ROI is required for this run.",
+            "message": "请提供 ROI(格式 x,y,w,h,即读数区域在照片中的位置)。本次运行需要手动指定 ROI。",
             "input_file_id": zip_file.id,
         }
 
     app_path = Path(__file__).resolve().parents[3] / "PowerMeterReader_App" / "PowerMeterReader.py"
     if not app_path.exists():
-        return {"status": "failed", "message": "PowerMeterReader_App/PowerMeterReader.py was not found."}
+        return {"status": "failed", "message": "未找到 PowerMeterReader_App/PowerMeterReader.py(稳定性分析依赖该脚本)。"}
 
     output_root = Path(settings.upload_dir).resolve() / "case_modules" / str(module.id) / f"stability_{uuid.uuid4().hex[:8]}"
     output_root.mkdir(parents=True, exist_ok=True)
@@ -451,12 +451,12 @@ def _run_stability(module: CaseModule, db: Session, config: dict[str, Any]) -> d
     except subprocess.TimeoutExpired:
         return {
             "status": "failed",
-            "message": "PowerMeterReader timed out after 300 s; check the input archive and ROI.",
+            "message": "PowerMeterReader 运行超时(300 秒),请检查压缩包内容与 ROI 设置。",
         }
     if completed.returncode != 0:
         return {
             "status": "failed",
-            "message": "PowerMeterReader failed.",
+            "message": "PowerMeterReader 运行失败,详见 stderr 输出。",
             "stdout": completed.stdout[-2000:],
             "stderr": completed.stderr[-2000:],
         }
@@ -646,7 +646,7 @@ async def upload_module_file(
     _, filepath = _module_upload_path(module.id, file.filename or "")
     content = await file.read()
     if len(content) > settings.max_upload_size:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds max upload size")
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="文件超过大小上限(50MB)")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, "wb") as handle:
         handle.write(content)
@@ -723,7 +723,7 @@ async def run_case_module(
                 db.add(CaseComponentItem(**item))
         result = {"status": "completed", "summary": "Case component list generated from case context.", "generated_items": existing or 8}
     else:
-        result = {"status": "failed", "message": f"Unsupported module type {module.module_type}"}
+        result = {"status": "failed", "message": f"不支持的模块类型 {module.module_type}"}
 
     module.result_json = result
     module.status = "completed" if result.get("status") == "completed" else result.get("status", "failed")

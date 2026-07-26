@@ -11,6 +11,7 @@ corresponding tool is skipped — never a guess.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .design import design_linear_cavity
@@ -109,6 +110,24 @@ def compute_case_physics(
     results: dict[str, Any] = {}
     tools: list[str] = []
     skipped: list[str] = []
+
+    # The case form stores values as strings; a pasted JSON dict for `crystal`
+    # must still be usable, and an unusable one must be REPORTED, not silently
+    # dropped — silent drops degrade the search with no visible signal.
+    raw_crystal = params.get("crystal")
+    if isinstance(raw_crystal, str):
+        try:
+            parsed = json.loads(raw_crystal)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            params["crystal"] = parsed
+        else:
+            params["crystal"] = None
+            skipped.append(
+                "crystal: 参数类型错误(需为 {n, thickness_mm, position_mm} 字典),已忽略。"
+                "若填的是倍频晶体名,请使用「倍频晶体」(nonlinear_crystal)参数。"
+            )
 
     def _safe(tool_name: str, fn, cfg):
         """Run a kernel tool; a malformed parameter skips it, never raises.

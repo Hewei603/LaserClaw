@@ -94,6 +94,18 @@ export function PowerCurveResult({ result, showComparison = true }) {
               ['Caird η₀', result.caird?.applicable ? `${result.caird.intrinsic_slope_pct}%` : null],
             ]} />
           )}
+          {/* The two-point-fit warning ("R²=1 is meaningless, measure a third
+              curve") exists precisely to stop this number going into a paper
+              unqualified — swallowing it defeats the analysis. */}
+          {result.findlay_clay?.applicable === false && result.findlay_clay?.note && (
+            <div className="disclaimer">{t('caseDetail.modulesTab.fcNotApplicable')}{result.findlay_clay.note}</div>
+          )}
+          {[result.findlay_clay?.warning, result.caird?.warning].filter(Boolean).map((w) => (
+            <div key={w} className="disclaimer">{w}</div>
+          ))}
+          {result.caird?.applicable === false && result.caird?.note && (
+            <div className="disclaimer">Caird: {result.caird.note}</div>
+          )}
         </div>
       )}
     </div>
@@ -101,19 +113,22 @@ export function PowerCurveResult({ result, showComparison = true }) {
 }
 
 export function CavityDesignResult({ result }) {
-  const { t, lang, te } = useLanguage();
+  const { t, te } = useLanguage();
   const rec = result.recommended || result.analysis;
-  const summary = lang === 'zh' && rec?.length_mm != null
-    ? `推荐腔长 L = ${rec.length_mm} mm，束腰 w0 = ${rec.waist_w0_mm} mm`
-    : result.summary;
+  // A fixed-length analysis of an UNSTABLE geometry must never read like a
+  // recommendation — the student would go build a cavity that cannot lase.
+  const unstable = rec && rec.stable === false;
   return (
     <div className="generated-section">
-      {summary && <p className="result-summary">{summary}</p>}
+      {unstable && <div className="error">{t('caseDetail.modulesTab.unstableWarn')}</div>}
+      {result.summary && <p className="result-summary">{result.summary}</p>}
       {result.scan?.stable_windows_mm && (
         <StatChips items={[[t('caseDetail.modulesTab.stableWindows'),
-          result.scan.stable_windows_mm.map(([a, b]) => `${a} – ${b} mm`).join('；')]]} />
+          result.scan.stable_windows_mm.length
+            ? result.scan.stable_windows_mm.map(([a, b]) => `${a} – ${b} mm`).join('；')
+            : '—']]} />
       )}
-      {rec && (
+      {rec && !unstable && (
         <div>
           <h3>{t('caseDetail.modulesTab.recommended')}</h3>
           <StatChips items={[
@@ -122,11 +137,21 @@ export function CavityDesignResult({ result }) {
             ['w@M1 (mm)', rec.w_on_mirror1_mm],
             ['w@M2 (mm)', rec.w_on_mirror2_mm],
             ['w@crystal (mm)', rec.w_in_crystal_mm],
-            ['|m|', rec.stability_m != null ? Math.abs(rec.stability_m).toFixed(3) : null],
+            [t('caseDetail.modulesTab.thermalTol'),
+              rec.thermal_lens_tolerance_dioptre != null ? `${rec.thermal_lens_tolerance_dioptre} D` : null],
           ]} />
+          {rec.criterion && (
+            <p className="muted">{t('caseDetail.modulesTab.criterion')}: {rec.criterion}</p>
+          )}
         </div>
       )}
-      {result.placement && (
+      {rec && unstable && (
+        <StatChips items={[
+          ['L (mm)', rec.length_mm],
+          ['m', rec.stability_m],
+        ]} />
+      )}
+      {result.placement && !unstable && (
         <div>
           <h3>{t('caseDetail.modulesTab.placement')}</h3>
           <table className="mini-table">
@@ -138,20 +163,21 @@ export function CavityDesignResult({ result }) {
           </table>
         </div>
       )}
+      {(result.assumptions || []).length > 0 && (
+        <p className="muted">{t('caseDetail.modulesTab.assumptions')}: {result.assumptions.join('；')}</p>
+      )}
+      {result.disclaimer && <div className="disclaimer">{result.disclaimer}</div>}
     </div>
   );
 }
 
 export function PhaseMatchResult({ result }) {
-  const { t, lang, te } = useLanguage();
+  const { t, te } = useLanguage();
   if (!result.solutions) return null;
   const matched = result.solutions.filter((s) => s.theta_deg != null);
-  const summary = lang === 'zh'
-    ? `共 ${matched.length} 个相位匹配解 → ${matched[0] ? `${matched[0].lambda3_nm} nm` : '无'}`
-    : result.summary;
   return (
     <div className="generated-section">
-      {summary && <p className="result-summary">{summary}</p>}
+      {result.summary && <p className="result-summary">{result.summary}</p>}
       <h3>{t('caseDetail.modulesTab.pmSolutions')}</h3>
       <table className="mini-table">
         <thead><tr><th>{t('caseDetail.modulesTab.colPlane')}</th><th className="num">θ (°)</th><th className="num">φ (°)</th><th className="num">λ₃ (nm)</th><th className="num">{t('caseDetail.modulesTab.colWalkoff')}</th><th>{t('caseDetail.modulesTab.colConfidence')}</th></tr></thead>
@@ -168,7 +194,9 @@ export function PhaseMatchResult({ result }) {
           ))}
         </tbody>
       </table>
-      {matched.length === 0 && <p className="muted">{result.summary}</p>}
+      {/* The principal-plane caveat and "verify the cut with the vendor" line
+          are the guard against ordering a mis-cut crystal — always visible. */}
+      {result.disclaimer && <div className="disclaimer">{result.disclaimer}</div>}
     </div>
   );
 }
@@ -237,8 +265,15 @@ export function ComponentMatchResult({ result }) {
 }
 
 export function ModuleResult({ moduleType, result, showComparison = true }) {
-  if (!result || result.status === 'needs_input') {
-    return result?.message ? <div className="disclaimer">{result.message}</div> : null;
+  // needs_input AND failed both carry their explanation in `message` — a
+  // failed run must show WHY, not just a status badge over an empty card.
+  if (!result || result.status === 'needs_input' || result.status === 'failed') {
+    if (!result?.message) return null;
+    return (
+      <div className={result.status === 'failed' ? 'error' : 'disclaimer'}>
+        {result.message}
+      </div>
+    );
   }
   if (moduleType === 'power_curve') return <PowerCurveResult result={result} showComparison={showComparison} />;
   if (moduleType === 'cavity_design') return <CavityDesignResult result={result} />;
@@ -246,4 +281,156 @@ export function ModuleResult({ moduleType, result, showComparison = true }) {
   if (moduleType === 'coating_tmm') return <CoatingTmmResult result={result} />;
   if (moduleType === 'component_match') return <ComponentMatchResult result={result} />;
   return result.summary ? <p className="result-summary">{result.summary}</p> : null;
+}
+
+/** Kernel results injected into a generated plan (content.computed_physics).
+ *
+ * This is the line between "deterministically computed" and "model prose":
+ * without it the student cannot tell which numbers were calculated and which
+ * were written by the LLM — the core promise of v2.
+ */
+export function PhysicsFactsBlock({ physics }) {
+  const { t, te } = useLanguage();
+  if (!physics) return null;
+
+  if (!physics.available) {
+    return (
+      <div className="error" style={{ marginBottom: '1rem' }}>
+        <strong>⚠ {t('caseDetail.physics.notRun')}</strong>
+        <p>{t('caseDetail.physics.notRunHint')}</p>
+        {(physics.skipped || []).length > 0 && (
+          <p className="muted">{t('caseDetail.physics.skippedTitle')}: {physics.skipped.join('；')}</p>
+        )}
+      </div>
+    );
+  }
+
+  const results = physics.results || {};
+  const search = results.cavity_design_search;
+  const design = results.cavity_design;
+  const pm = results.phase_matching;
+  const coating = results.coating_check;
+  const rec = search?.recommended;
+
+  return (
+    <div className="generated-section" style={{ border: '1px solid #2f5d3a', borderRadius: '8px', padding: '0.9rem' }}>
+      <div className="generated-card-title">
+        <h3>{t('caseDetail.physics.title')}</h3>
+        <span className="meta-pill">{(physics.tools_run || []).join(' · ')}</span>
+      </div>
+
+      {(physics.skipped || []).length > 0 && (
+        <div className="disclaimer">{t('caseDetail.physics.skippedTitle')}: {physics.skipped.join('；')}</div>
+      )}
+
+      {search && (
+        <div>
+          {search.note && <p className="muted">{search.note}</p>}
+          {rec && (
+            <StatChips items={[
+              ['R1', rec.R1], ['R2', rec.R2],
+              ['L (mm)', rec.length_mm],
+              ['w0 (mm)', rec.waist_w0_mm],
+              ['w@crystal (mm)', rec.spot_in_crystal_mm],
+              [t('caseDetail.physics.wavelength'), search.wavelength_nm != null ? `${search.wavelength_nm} nm` : null],
+              [t('caseDetail.physics.thermalTol'),
+                rec.thermal_lens_tolerance_dioptre != null
+                  ? `${rec.thermal_lens_tolerance_dioptre} D${rec.thermal_lens_tolerance_min_f_mm ? ` (f≥${rec.thermal_lens_tolerance_min_f_mm}mm)` : ''}`
+                  : null],
+            ]} />
+          )}
+          {rec?.element_placement && (
+            <div>
+              <h3>{t('caseDetail.physics.placement')}</h3>
+              <table className="mini-table">
+                <tbody>
+                  {rec.element_placement.map((p) => (
+                    <tr key={p.element}><td>{te(p.element)}</td><td className="num">{p.position_mm} mm</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {(search.alternatives || []).length > 0 && (
+            <details>
+              <summary className="muted">{t('caseDetail.physics.alternatives')} ({search.alternatives.length})</summary>
+              <table className="mini-table">
+                <tbody>
+                  {search.alternatives.map((c, i) => (
+                    <tr key={i}>
+                      <td>{c.R1} + {c.R2}</td>
+                      <td className="num">L={c.length_mm} mm</td>
+                      <td className="num">w0={c.waist_w0_mm} mm</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          )}
+          {search.search_space && (
+            <p className="muted">
+              {t('caseDetail.physics.searchSpace')}:
+              {' '}{search.search_space.geometries_evaluated} {t('caseDetail.physics.evaluated')} ·
+              {' '}{search.search_space.stable_configurations_found} {t('caseDetail.physics.stableFound')} ·
+              {' '}{t('caseDetail.physics.rocSource')}: {search.search_space.roc_source === 'lab inventory'
+                ? t('caseDetail.physics.rocInventory') : t('caseDetail.physics.rocCatalog')}
+            </p>
+          )}
+          {(search.caveats || []).map((c) => <div key={c} className="disclaimer">{c}</div>)}
+        </div>
+      )}
+
+      {design && (
+        <div>
+          {design.summary && <p className="result-summary">{design.summary}</p>}
+          <StatChips items={[
+            ['L (mm)', design.recommended_length_mm],
+            ['w0 (mm)', design.waist_w0_mm],
+            ['w@M1 (mm)', design.spot_on_mirror1_mm],
+            ['w@M2 (mm)', design.spot_on_mirror2_mm],
+            ['w@crystal (mm)', design.spot_in_crystal_mm],
+          ]} />
+          {design.element_placement && (
+            <table className="mini-table">
+              <tbody>
+                {design.element_placement.map((p) => (
+                  <tr key={p.element}><td>{te(p.element)}</td><td className="num">{p.position_mm} mm</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {pm && Object.entries(pm).map(([stage, entry]) => (
+        <div key={stage}>
+          <h3>{t('caseDetail.physics.phaseTitle')} — {stage}</h3>
+          <table className="mini-table">
+            <thead><tr><th>{t('caseDetail.modulesTab.colPlane')}</th><th className="num">θ (°)</th><th className="num">φ (°)</th><th className="num">λ₃ (nm)</th></tr></thead>
+            <tbody>
+              {(entry.solutions || []).map((s, i) => (
+                <tr key={i}>
+                  <td>{s.plane || 'uniaxial'}</td>
+                  <td className="num">{s.theta_deg}</td>
+                  <td className="num">{s.phi_deg ?? '-'}</td>
+                  <td className="num">{s.lambda3_nm}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {entry.note && <div className="disclaimer">{entry.note}</div>}
+        </div>
+      ))}
+
+      {coating && (
+        <div>
+          <h3>{t('caseDetail.physics.coatingTitle')}</h3>
+          {coating.summary && <p className="result-summary">{coating.summary}</p>}
+        </div>
+      )}
+
+      {/* physics.note is the instruction addressed to the LLM, not to the
+          reader — the block title already states these values are computed. */}
+    </div>
+  );
 }
