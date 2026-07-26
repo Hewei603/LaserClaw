@@ -47,8 +47,6 @@ def has_expected_shape(mode: str, content: dict[str, Any]) -> bool:
         return bool(content.get("suggestions") or content.get("diagnosis") or content.get("checks") or content.get("likely_causes"))
     if mode == "report":
         return bool(content.get("summary") or content.get("sections"))
-    if mode == "rezonator":
-        return bool(content.get("elements") or content.get("cavity_type") or content.get("parameters") or content.get("rezonator") or content.get("cavity"))
     return True
 
 
@@ -139,7 +137,7 @@ async def run_benchmark(modes: list[str], repeats: int) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark structured generation latency and output shape.")
-    parser.add_argument("--modes", default="plan,troubleshooting,report,rezonator")
+    parser.add_argument("--modes", default="plan,troubleshooting,report")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()

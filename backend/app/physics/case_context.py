@@ -29,9 +29,24 @@ def _num(value: Any) -> float | None:
         return None
 
 
+def _roc_ok(value: Any) -> bool:
+    """True when a mirror entry is usable: a number or an explicit flat marker."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("flat", "inf", "infinite", "plane", "平镜")
+    return _num(value) is not None and _num(value) != 0
+
+
 def _cavity_config(params: dict) -> dict | None:
-    """Build a cavity_design config if the case carries enough geometry."""
-    if params.get("R1_mm") is None and params.get("R2_mm") is None:
+    """Build a cavity_design config if the case carries enough USABLE geometry.
+
+    A placeholder such as ``R1_mm: "TBD"`` means the user has not chosen mirrors
+    yet, so it must fall through to the design search rather than fail analysis
+    and suppress the search.
+    """
+    r1, r2 = params.get("R1_mm"), params.get("R2_mm")
+    if r1 is None and r2 is None:
+        return None
+    if not all(_roc_ok(v) for v in (r1, r2) if v is not None):
         return None
     cfg: dict[str, Any] = {k: params[k] for k in _CAVITY_KEYS if k in params}
     cfg.setdefault("wavelength_nm", params.get("wavelength_nm", 1064.0))
@@ -110,10 +125,14 @@ def compute_case_physics(
 
     # Search only when the case gives at least one physical hint. With truly
     # empty parameters we must not invent an operating wavelength.
-    has_hint = any(
+    # A geometry is wavelength-dependent (w ~ sqrt(lambda)), so never design
+    # without knowing the operating wavelength — designing at a silent 1064 nm
+    # default would hand a Ti:Sa or 532 nm user a confidently wrong cavity.
+    lasing_nm = _num(params.get("wavelength_nm"))
+    has_hint = lasing_nm is not None and any(
         params.get(k) is not None
         for k in ("wavelength_nm", "crystal", "target_waist_mm", "nonlinear_crystal",
-                  "shg_crystal", "gain_medium", "pump_nm")
+                  "shg_crystal", "gain_medium")
     )
 
     cavity_cfg = _cavity_config(params)
@@ -121,7 +140,7 @@ def compute_case_physics(
         # The user gave no mirrors at all — the usual real case. Don't give up
         # and don't let the model guess: SEARCH for a workable geometry, using
         # radii the lab actually owns when we know them.
-        wl = _num(params.get("wavelength_nm")) or 1064.0
+        wl = lasing_nm
         search = _safe("cavity_search", lambda cfg: design_linear_cavity(**cfg), {
             "wavelength_nm": wl,
             "crystal": params.get("crystal") if isinstance(params.get("crystal"), dict) else None,
@@ -132,6 +151,7 @@ def compute_case_physics(
             best = search["candidates"][0]
             results["cavity_design_search"] = {
                 "note": "案例未给定腔镜,以下几何由 LaserClaw 搜索得出(非用户输入)",
+                "wavelength_nm": wl,
                 "recommended": {
                     "R1": best["R1_label"], "R2": best["R2_label"],
                     "length_mm": best["length_mm"],
@@ -140,6 +160,9 @@ def compute_case_physics(
                     "spot_on_mirror2_mm": best.get("w_on_mirror2_mm"),
                     "spot_in_crystal_mm": best.get("w_in_crystal_mm"),
                     "stability_m": best["stability_m"],
+                    "thermal_lens_tolerance_dioptre": best.get("thermal_lens_tolerance_dioptre"),
+                    "thermal_lens_tolerance_min_f_mm": best.get("thermal_lens_tolerance_min_f_mm"),
+                    "score_breakdown": best.get("score_breakdown"),
                     "element_placement": _placement_from(best),
                 },
                 "alternatives": [
@@ -201,8 +224,10 @@ def compute_case_physics(
         "results": results,
         "note": (
             "These values were computed by LaserClaw's deterministic physics kernel "
-            "(ABCD/Gaussian, Sellmeier phase matching, thin-film TMM). Use them as-is "
-            "in the generated content and do not recompute or round them differently."
+            "(ABCD/Gaussian, Sellmeier phase matching, thin-film TMM) for "
+            f"{lasing_nm if lasing_nm else 'the stated'} nm. Use them as-is in the "
+            "generated content, state the wavelength they belong to, and do not "
+            "recompute or round them differently."
             if results else
             "No computable cavity/nonlinear parameters were supplied, so no geometry "
             "was computed. Do not invent lengths, angles or spot sizes; state that they "

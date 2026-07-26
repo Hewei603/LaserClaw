@@ -1,6 +1,7 @@
 """Stateful Agent orchestrator."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -346,9 +347,19 @@ async def _generate_artifact(
         payload["agent_context"] = extra_context
     payload["user_request"] = goal
     if mode == "plan":
-        payload["computed_physics"] = compute_case_physics(payload.get("parameters"))
+        # Same inventory-constrained search as the REST path, so the two never
+        # disagree about the recommended cavity.
+        payload["computed_physics"] = await asyncio.to_thread(
+            compute_case_physics, payload.get("parameters"),
+            available_rocs=payload.pop("_available_rocs", None),
+        )
     if mode == "troubleshooting":
         return await provider.generate_troubleshooting(payload.get("symptoms", []), payload)
     if mode == "report":
         return await provider.generate_report(payload)
+    if mode not in ("plan", "chat"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported generation mode '{mode}'",
+        )
     return await provider.generate_plan({**payload, "goal": goal})

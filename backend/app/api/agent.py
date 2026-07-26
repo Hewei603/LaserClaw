@@ -272,7 +272,7 @@ async def chat(
     if case is None:
         assistant_text = (
             "Link a case before asking LaserClaw to create a saved plan, troubleshooting guide, "
-            "report, or ReZonator draft."
+            "report, or physics module result."
         )
         db.add(
             AgentChatMessage(

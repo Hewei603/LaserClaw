@@ -30,6 +30,8 @@ build/
 *.sqlite
 
 # Uploads
+# Runtime upload dir when UPLOAD_DIR resolves to the repo root
+uploads/
 backend/uploads/*
 !backend/uploads/.gitkeep
 backend/uploads/authorized_lab_docs/*
