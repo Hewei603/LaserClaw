@@ -56,42 +56,18 @@ class ExperimentReportSchema(BaseModel):
         return self
 
 
-class ResonatorDraftSchema(BaseModel):
-    cavity_type: str = Field(default="", description="Cavity type (linear/ring/bow-tie)")
-    components: list[str] = Field(default_factory=list, description="Optical components list")
-    distances: dict[str, Any] = Field(default_factory=dict, description="Component distances (mm)")
-    crystal_position: str = Field(default="", description="Crystal position description")
-    parameters_to_scan: list[str] = Field(default_factory=list, description="Parameters to scan in simulation")
-    simulation_notes: str = Field(default="", description="Notes for ReZonator simulation")
-
-    @model_validator(mode="after")
-    def ensure_cavity_type(self) -> "ResonatorDraftSchema":
-        if not self.cavity_type:
-            self.cavity_type = "linear"
-        return self
-
-
-# ---------------------------------------------------------------------------
-# Schema registry
-# ---------------------------------------------------------------------------
 _SCHEMA_MAP: dict[str, type[BaseModel]] = {
     "plan": ExperimentPlanSchema,
     "troubleshooting": TroubleshootingSchema,
     "report": ExperimentReportSchema,
-    "rezonator": ResonatorDraftSchema,
 }
 
 REQUIRED_FIELDS: dict[str, list[str]] = {
     "plan": ["objective", "setup", "steps", "measurements", "risks", "next_actions"],
     "troubleshooting": ["symptom", "possible_causes", "diagnostic_checks", "recommended_actions", "expected_observations", "safety_notes"],
     "report": ["title", "background", "method", "observations", "data_summary", "conclusion", "next_steps"],
-    "rezonator": ["cavity_type", "components", "distances", "crystal_position", "parameters_to_scan", "simulation_notes"],
 }
 
-
-# ---------------------------------------------------------------------------
-# Validation and repair
-# ---------------------------------------------------------------------------
 
 class ValidationResult:
     """Result of schema validation."""

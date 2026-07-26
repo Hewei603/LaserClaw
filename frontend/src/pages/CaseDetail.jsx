@@ -16,7 +16,6 @@ function CaseDetail() {
     ['overview', t('caseDetail.tabs.overview')],
     ['plan', t('caseDetail.tabs.plan')],
     ['troubleshooting', t('caseDetail.tabs.troubleshooting')],
-    ['rezonator', t('caseDetail.tabs.rezonator')],
     ['report', t('caseDetail.tabs.report')],
     ['knowledge', t('caseDetail.tabs.knowledge')],
     ['modules', t('caseDetail.tabs.modules')],
@@ -96,7 +95,6 @@ function CaseDetail() {
     setGenerating((prev) => ({ ...prev, [type]: true }));
     try {
       if (type === 'plan') await casesApi.generatePlan(id);
-      if (type === 'rezonator') await casesApi.generateRezonator(id);
       if (type === 'troubleshooting') await casesApi.generateTroubleshooting(id);
       if (type === 'report') await casesApi.generateReport(id);
       await loadData();
@@ -506,7 +504,6 @@ function CaseDetail() {
 
       {activeTab === 'plan' && renderGenerated('plan')}
       {activeTab === 'troubleshooting' && renderGenerated('troubleshooting')}
-      {activeTab === 'rezonator' && renderGenerated('rezonator')}
       {activeTab === 'report' && renderGenerated('report')}
 
       {activeTab === 'knowledge' && (
@@ -563,7 +560,6 @@ function CaseDetail() {
                 <option value="troubleshooting">{t('caseDetail.agentTab.mTroubleshooting')}</option>
                 <option value="plan">{t('caseDetail.agentTab.mPlan')}</option>
                 <option value="report">{t('caseDetail.agentTab.mReport')}</option>
-                <option value="rezonator">{t('caseDetail.agentTab.mRezonator')}</option>
                 <option value="cavity_design">{t('caseDetail.agentTab.mCavityDesign')}</option>
                 <option value="phase_match">{t('caseDetail.agentTab.mPhaseMatch')}</option>
                 <option value="coating_tmm">{t('caseDetail.agentTab.mCoatingTmm')}</option>

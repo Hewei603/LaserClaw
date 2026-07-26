@@ -57,7 +57,7 @@ class AnthropicProvider(AIProvider):
         return await self._create_json_message(
             self._system_prompt(),
             self._case_prompt(
-                "Generate a laser experiment plan.",
+                "Generate a laser experiment plan. If case data has computed_physics.available=true, quote those kernel-computed values verbatim (cavity length, waist, spot sizes, element placements, phase-match angles) and never substitute your own estimate.",
                 case_data,
                 """
 Return JSON with this shape:
@@ -68,28 +68,6 @@ Return JSON with this shape:
   "parameters_to_check": ["parameter"],
   "safety_notes": ["note"],
   "expected_outputs": ["output"],
-  "model_provider": "anthropic",
-  "model": "model name"
-}
-""",
-            ),
-        )
-
-    async def generate_rezonator_schema(self, case_data: Dict[str, Any]) -> Dict[str, Any]:
-        return await self._create_json_message(
-            self._system_prompt(),
-            self._case_prompt(
-                "Generate a ReZonator schema/script draft for manual validation.",
-                case_data,
-                """
-Return JSON with this shape:
-{
-  "cavity_type": "linear|ring|bow-tie|custom",
-  "elements": [{"type": "mirror|crystal|lens|other", "name": "M1", "position": null}],
-  "position_source": "case data | to be computed by the cavity_design module",
-  "assumptions": ["assumption"],
-  "rezonator_script_draft": "draft text or pseudocode",
-  "validation_checks": ["check"],
   "model_provider": "anthropic",
   "model": "model name"
 }

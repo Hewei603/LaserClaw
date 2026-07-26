@@ -36,21 +36,6 @@ async def test_mock_provider_generate_plan():
     assert len(result["steps"]) > 0
 
 
-@pytest.mark.asyncio
-async def test_mock_provider_generate_rezonator():
-    """Mock provider can generate a ReZonator schema draft."""
-    provider = MockProvider()
-    case_data = {
-        "cavity_type": "ring",
-        "parameters": {"wavelength": "800nm"},
-    }
-
-    result = await provider.generate_rezonator_schema(case_data)
-
-    assert "disclaimer" in result
-    assert "cavity_type" in result
-    assert "elements" in result
-
 
 @pytest.mark.asyncio
 async def test_mock_provider_generate_troubleshooting():

@@ -39,11 +39,6 @@ export const casesApi = {
     return response.data;
   },
 
-  // 生成ReZonator模式
-  generateRezonator: async (id) => {
-    const response = await apiClient.post(`/api/cases/${id}/generate-rezonator`);
-    return response.data;
-  },
 
   // 生成故障排查
   generateTroubleshooting: async (id) => {

@@ -21,11 +21,9 @@ TRACE_TEST_GOALS = [
     ("plan", "帮我制定一个 Nd:YAG 激光器实验计划"),
     ("troubleshooting", "激光功率低，不出光，怎么排查"),
     ("report", "生成本次 Nd:YAG 实验报告"),
-    ("rezonator", "生成线形腔 ReZonator 仿真输入"),
     ("plan", "如何搭建倍频 532nm 系统"),
     ("troubleshooting", "光斑异常，模式跳变，如何处理"),
     ("report", "总结这次激光准直实验"),
-    ("rezonator", "腔稳定性分析，腔长 150mm"),
     ("plan", "Nd:YAG Q-switched 实验步骤"),
     ("troubleshooting", "LBO 倍频输出功率波动，排查"),
 ]

@@ -1,11 +1,25 @@
 """
 Application configuration.
 """
+import os
 from functools import lru_cache
 from typing import Optional
 
 from pydantic_settings import BaseSettings
+from pathlib import Path
+
 from pydantic import ConfigDict
+
+# Look for .env next to the repo root as well as the current working directory,
+# so running uvicorn from backend/ still picks up the project-level config.
+# Tests set LASERCLAW_NO_DOTENV=1 so a developer's local .env (real API keys,
+# a different provider) can never change what the suite exercises.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILES: tuple[str, ...] | None = (
+    None
+    if os.environ.get("LASERCLAW_NO_DOTENV")
+    else (str(_REPO_ROOT / ".env"), str(_REPO_ROOT / "backend" / ".env"), ".env")
+)
 
 
 class Settings(BaseSettings):
@@ -76,7 +90,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
-    model_config = ConfigDict(env_file=".env", extra="ignore")
+    model_config = ConfigDict(env_file=_ENV_FILES, extra="ignore")
 
 
 @lru_cache()

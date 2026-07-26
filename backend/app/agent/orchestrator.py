@@ -12,6 +12,7 @@ from ..inventory.evaluator import evaluate_candidates
 from ..models import AgentStep, AgentTask, CaseModule, ExperimentCase, GeneratedContent
 from ..observability.audit import record_audit
 from ..observability.usage import apply_usage_to_generated
+from ..physics.case_context import compute_case_physics
 from ..providers import get_ai_provider
 from .guardrails import assess_risk
 from .planner import build_plan
@@ -344,10 +345,10 @@ async def _generate_artifact(
     if extra_context:
         payload["agent_context"] = extra_context
     payload["user_request"] = goal
+    if mode == "plan":
+        payload["computed_physics"] = compute_case_physics(payload.get("parameters"))
     if mode == "troubleshooting":
         return await provider.generate_troubleshooting(payload.get("symptoms", []), payload)
     if mode == "report":
         return await provider.generate_report(payload)
-    if mode == "rezonator":
-        return await provider.generate_rezonator_schema(payload)
     return await provider.generate_plan({**payload, "goal": goal})

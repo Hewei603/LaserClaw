@@ -30,20 +30,6 @@ class MockProvider(AIProvider):
             "required_equipment": self._equipment(cavity_type),
         }
 
-    async def generate_rezonator_schema(self, case_data: Dict[str, Any]) -> Dict[str, Any]:
-        cavity_type = case_data.get("cavity_type", "linear")
-        parameters = case_data.get("parameters", {})
-        return {
-            "disclaimer": "Draft schema only. Validate dimensions and stability in ReZonator before use.",
-            "cavity_type": cavity_type,
-            "elements": [
-                {"type": "mirror", "name": "M1", "position": 0, "roc": parameters.get("m1_roc", "flat")},
-                {"type": "crystal", "name": "Gain medium", "position": 50, "length": parameters.get("crystal_length", "10 mm")},
-                {"type": "mirror", "name": "M2", "position": 100, "roc": parameters.get("m2_roc", "100 mm")},
-            ],
-            "notes": "Replace placeholder positions with measured geometry and verify safety margins.",
-        }
-
     async def generate_troubleshooting(self, symptoms: List[str], case_data: Dict[str, Any]) -> Dict[str, Any]:
         if not symptoms:
             symptoms = ["general performance issue"]
