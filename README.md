@@ -12,7 +12,7 @@ LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows*
 |---|---|
 | Lab knowledge is scattered across manuals, SOPs, notes, and case files | Two-tier RAG over global lab documents and case-specific documents |
 | AI answers are hard to audit | Stored retrieval runs, citations, generated artifacts, Agent steps, and tool calls |
-| Troubleshooting and reporting are repetitive | Structured generation for plans, troubleshooting, reports, and ReZonator drafts |
+| Troubleshooting and reporting are repetitive | Structured generation for plans, troubleshooting and reports, grounded in deterministic physics results |
 | Research groups need long-term collaboration | Projects, users, groups, permissions, knowledge governance, versioned prompts/workflows, and case bundles |
 
 ## Core Features
@@ -21,7 +21,7 @@ LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows*
 - **Two-tier RAG** over global lab knowledge plus case-specific attachments and generated artifacts.
 - **Global knowledge base** for PDFs, TXT, Markdown, CSV, JSON, TSV, and log files.
 - **Knowledge governance** with source status, version, owner, reviewer, review time, and reindexing.
-- **Tool-calling Agent workflow** for chat, experiment plans, troubleshooting, reports, and ReZonator drafts.
+- **Tool-calling Agent workflow** for chat, experiment plans, troubleshooting, reports, and deterministic physics/measurement modules.
 - **Structured AI artifacts** saved as versioned generated content.
 - **Prompt/workflow versioning** for reproducible AI runs.
 - **Case bundle export** with manifest, attachments, generated content, and knowledge metadata.

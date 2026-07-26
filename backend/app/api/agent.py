@@ -58,10 +58,6 @@ _CONTENT_KEYWORDS = {
         "实验报告", "报告", "总结报告", "实验总结",
         "report", "experiment report", "lab report", "summary report",
     ],
-    "rezonator": [
-        "rezonator", "仿真输入", "腔型草稿", "谐振腔草稿", "腔参数草稿",
-        "resonator draft", "simulation input", "cavity draft",
-    ],
     "stability": [
         "稳定性", "功率稳定", "功率计读数", "ocr", "稳定性报告",
         "power stability", "power meter", "stability report",
@@ -117,7 +113,7 @@ def _route_mode(message: str) -> str:
 
     for mode in ["stability", "beam_profile", "spectrum", "components", "module_management",
                  "cavity_design", "phase_match", "coating_tmm", "component_match", "power_curve",
-                 "rezonator", "troubleshooting", "report", "plan"]:
+                 "troubleshooting", "report", "plan"]:
         keywords = _CONTENT_KEYWORDS[mode]
         if any(kw in text for kw in keywords):
             return mode

@@ -62,36 +62,23 @@ class OpenAIProvider(AIProvider):
             "experiment plan",
             case_data,
             """
+
+If the case data contains "computed_physics" with available=true, those numbers
+come from LaserClaw's deterministic physics kernel and are AUTHORITATIVE: quote
+the cavity length, waist, spot sizes, element positions and phase-matching
+angles exactly as given (with units), and reference them in the setup and steps.
+Never replace them with your own estimate. If available=false, say the geometry
+still has to be computed with the cavity_design module.
+
 Return JSON with exactly these fields:
 {
   "objective": "clear experiment objective",
+  "computed_parameters": {"cavity_length_mm": null, "waist_w0_mm": null, "phase_match_angle_deg": null},
   "setup": "equipment and optical setup description",
   "steps": ["step 1 description", "step 2 description"],
   "measurements": ["measurement 1", "measurement 2"],
   "risks": ["safety risk 1", "mitigation"],
   "next_actions": ["follow-up action 1"]
-}
-""",
-        )
-
-    async def generate_rezonator_schema(self, case_data: Dict[str, Any]) -> Dict[str, Any]:
-        return await self._generate_json(
-            "ReZonator simulation draft",
-            case_data,
-            """
-This is a SETUP DRAFT, not a computed design. Do NOT invent cavity lengths,
-spacings or spot sizes: put a value only when it is present in the case data,
-otherwise use null and say it must come from the cavity_design module.
-
-Return JSON with exactly these fields:
-{
-  "cavity_type": "linear|ring|bow-tie|custom",
-  "components": ["component names in beam order"],
-  "distances": {"<segment name>": null},
-  "distances_source": "case data | to be computed by the cavity_design module",
-  "crystal_position": "qualitative placement description, no invented numbers",
-  "parameters_to_scan": ["parameter to sweep in simulation"],
-  "simulation_notes": "notes for ReZonator simulation setup"
 }
 """,
         )
