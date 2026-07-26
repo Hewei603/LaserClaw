@@ -1,8 +1,11 @@
 """Phase two collaboration and governance API tests."""
 
 
-ADMIN_HEADERS = {"X-User-Role": "admin", "X-User-Email": "admin@example.test", "X-User-Id": "1"}
-REVIEWER_HEADERS = {"X-User-Role": "reviewer", "X-User-Email": "reviewer@example.test", "X-User-Id": "2"}
+# Bootstrap identities use high, non-colliding ids that no test provisions, so
+# they stay on the "unknown user -> header role" bootstrap path. A provisioned
+# user (ids start at 1) can no longer borrow these roles by header alone.
+ADMIN_HEADERS = {"X-User-Role": "admin", "X-User-Email": "admin@example.test", "X-User-Id": "99"}
+REVIEWER_HEADERS = {"X-User-Role": "reviewer", "X-User-Email": "reviewer@example.test", "X-User-Id": "98"}
 
 
 def test_project_case_v2_and_bundle_export(client):

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import admin, agent, attachments, case_modules, cases, collaboration, evals, generation, knowledge, versioning
+from .api import admin, agent, attachments, case_modules, cases, collaboration, evals, generation, inventory, knowledge, versioning
 from .config import get_settings
 from .database import Base, engine
 from . import models  # noqa: F401 - register SQLAlchemy models
@@ -63,6 +63,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(collaboration.router, prefix="/api/collaboration", tags=["collaboration"])
 app.include_router(versioning.router, prefix="/api/versioning", tags=["versioning"])
 app.include_router(evals.router, prefix="/api/evals", tags=["evals"])
+app.include_router(inventory.router, prefix="/api/inventory", tags=["inventory"])
 
 
 @app.get("/")
@@ -72,4 +73,8 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    # The provider block lets the frontend show a "demo mode" banner: mock
+    # output reads like real output, so the user must be told which is running.
+    from .providers import provider_status
+
+    return {"status": "healthy", "provider": provider_status()}

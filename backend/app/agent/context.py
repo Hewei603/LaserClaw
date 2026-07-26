@@ -85,7 +85,7 @@ def build_chat_context(
             "Global knowledge takes precedence over case-specific data when they conflict. Always apply lab safety rules and SOPs from global sources.",
             "Use retrieved knowledge when relevant and cite the source title. Say when evidence is missing.",
             "Keep laser operations advisory; do not claim to operate hardware.",
-            "If the user asks to generate a plan, troubleshooting guide, report, or ReZonator draft, the backend will call a tool and save an artifact.",
+            "If the user asks to generate a plan, troubleshooting guide or report, or to compute a cavity/phase-match/coating/power-curve result, the backend will call a tool and save an artifact.",
             "Use conversation_summary and memories as durable long-term context. Prefer current case data and retrieved knowledge when they conflict with remembered facts.",
         ],
     }

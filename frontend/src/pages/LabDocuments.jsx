@@ -40,7 +40,7 @@ export default function LabDocuments() {
       try {
         await knowledgeApi.uploadGlobalSource(file);
       } catch (err) {
-        errors.push(`${file.name}: ${err.response?.data?.detail || err.message}`);
+        errors.push(`${file.name}: ${err.message}`);
       }
     }
     setUploading(false);
@@ -63,7 +63,7 @@ export default function LabDocuments() {
       await knowledgeApi.deleteSource(source.id);
       setSources((prev) => prev.filter((item) => item.id !== source.id));
     } catch (err) {
-      setUploadError(err.response?.data?.detail || err.message);
+      setUploadError(err.message);
     } finally {
       setDeletingId(null);
     }

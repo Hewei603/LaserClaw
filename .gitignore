@@ -27,9 +27,12 @@ build/
 
 # Database
 *.db
+*.db-journal
 *.sqlite
 
 # Uploads
+# Runtime upload dir when UPLOAD_DIR resolves to the repo root
+uploads/
 backend/uploads/*
 !backend/uploads/.gitkeep
 backend/uploads/authorized_lab_docs/*
@@ -57,3 +60,9 @@ htmlcov/
 
 # Alembic
 alembic/versions/*.pyc
+
+# ReZonator 2 reference source (GPL — reference/verification oracle ONLY, never commit)
+rezonator2-master/
+rezonator2/
+.env.bak
+.env.*.bak

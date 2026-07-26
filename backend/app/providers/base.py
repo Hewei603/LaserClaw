@@ -11,10 +11,6 @@ class AIProvider(ABC):
         pass
 
     @abstractmethod
-    async def generate_rezonator_schema(self, case_data: Dict[str, Any]) -> Dict[str, Any]:
-        pass
-
-    @abstractmethod
     async def generate_troubleshooting(self, symptoms: List[str], case_data: Dict[str, Any]) -> Dict[str, Any]:
         pass
 

@@ -12,7 +12,7 @@ LaserClaw 是一个面向激光实验工作流的本地优先 **RAG Agent 工作
 |---|---|
 | 实验知识分散在手册、SOP、笔记和附件里 | 使用两层 RAG 同时检索全局实验室文档和 Case 专属文档 |
 | AI 回答难以审计 | 保存 retrieval run、citation、generated artifact、Agent step 和 tool call |
-| 排障、计划、报告和仿真草稿重复劳动多 | 自动生成结构化 plan、troubleshooting、report、ReZonator draft |
+| 排障、计划、报告重复劳动多 | 自动生成结构化 plan、troubleshooting、report,几何参数由确定性物理内核计算 |
 | 课题组需要长期协作 | 支持项目、用户、组、权限、知识库治理、prompt/workflow 版本和 Case bundle |
 
 ## 核心能力
@@ -21,8 +21,8 @@ LaserClaw 是一个面向激光实验工作流的本地优先 **RAG Agent 工作
 - **两层 RAG**：全局实验室知识作为共享依据，Case 附件和生成内容作为当前实验上下文。
 - **全局知识库**：支持上传 PDF、TXT、Markdown、CSV、JSON、TSV、log 等共享文档。
 - **知识库治理**：支持 source status、version、owner、reviewer、review time 和 reindex。
-- **Tool-calling Agent 工作流**：自动路由普通聊天、实验计划、故障排查、实验报告和 ReZonator 草稿。
-- **结构化 AI artifact**：保存 plan、troubleshooting、report、image analysis、resonator 等生成内容。
+- **Tool-calling Agent 工作流**：自动路由普通聊天、实验计划、故障排查、实验报告和物理计算模块(谐振腔设计、相位匹配、镀膜评估、元件匹配、功率曲线)。
+- **结构化 AI artifact**：保存 plan、troubleshooting、report、image analysis、物理模块结果等生成内容。
 - **Prompt/workflow 版本管理**：维护 active prompt 和 workflow version，支持可复现 AI 运行。
 - **Case bundle 导出**：导出完整 Case 包，包含 manifest、附件、生成内容和知识源元数据。
 - **项目级 ACL**：Case、知识检索、附件、生成、Agent task、Case module 和 bundle export 都遵循项目权限。
@@ -133,11 +133,20 @@ LaserClaw 有两类检索来源：
 
 ## Windows 快速启动
 
+**前置要求**(只需装一次):
+
+- [Python 3.11+](https://www.python.org/downloads/) —— 安装时勾选 "Add python.exe to PATH"
+- [Node.js 22 LTS](https://nodejs.org/)
+
+然后双击:
+
 ```bat
 Launch-LaserClaw.bat
 ```
 
-启动脚本会安装依赖并启动：
+首次运行会自动创建 `.env` 配置文件(演示模式)。**日常怎么用请看中文使用指南:[docs/GUIDE_V2.md](docs/GUIDE_V2.md)**。
+
+启动脚本会安装依赖并启动:
 
 - 后端 API：<http://127.0.0.1:8000>
 - 前端：<http://127.0.0.1:5173>
@@ -207,6 +216,16 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-sonnet-4-5
 
+# 大陆模型厂商(推荐):AI_PROVIDER 填厂商名 + 对应 key
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-chat
+QWEN_API_KEY=
+QWEN_MODEL=qwen-plus
+ZHIPU_API_KEY=
+ZHIPU_MODEL=glm-4-plus
+MOONSHOT_API_KEY=
+MOONSHOT_MODEL=moonshot-v1-8k
+
 DATABASE_URL=sqlite:///./laserclaw.db
 UPLOAD_DIR=./uploads
 MAX_UPLOAD_SIZE=52428800
@@ -227,7 +246,8 @@ VITE_API_URL=http://127.0.0.1:8000
 
 Provider 模式：
 
-- `mock`：确定性的本地 demo 模式
+- `mock`：确定性的本地 demo 模式(输出为固定模板,页面顶部会显示演示模式横幅)
+- `deepseek` / `qwen` / `zhipu` / `moonshot`：大陆模型厂商(DeepSeek、通义千问、智谱 GLM、Kimi),填对应 `*_API_KEY` 即可
 - `openai`：OpenAI-compatible Chat Completions provider
 - `anthropic`：Anthropic provider
 

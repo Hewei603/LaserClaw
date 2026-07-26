@@ -4,6 +4,8 @@ Run with: pytest backend/tests/eval_rag_dataset.py -v -s
 """
 from __future__ import annotations
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # RAG evaluation dataset
 # Each entry: (query, expected_keywords, expected_source_hint)
@@ -81,7 +83,6 @@ def evaluate_rag_hit(query: str, results: list[dict], expected_keywords: list[st
 # ---------------------------------------------------------------------------
 # pytest integration
 # ---------------------------------------------------------------------------
-import pytest
 
 
 @pytest.mark.parametrize("query,keywords,source_hint", RAG_EVAL_DATASET[:5])

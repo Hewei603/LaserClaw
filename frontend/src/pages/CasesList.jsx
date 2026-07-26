@@ -7,6 +7,7 @@ function CasesList() {
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionError, setActionError] = useState(null);
   const { t } = useLanguage();
 
   useEffect(() => { loadCases(); }, []);
@@ -30,7 +31,7 @@ function CasesList() {
       await casesApi.delete(id);
       loadCases();
     } catch (err) {
-      alert(t('casesList.deleteFailed') + ': ' + err.message);
+      setActionError(t('casesList.deleteFailed') + ': ' + err.message);
     }
   };
 
@@ -45,6 +46,12 @@ function CasesList() {
         <h1>{t('casesList.title')}</h1>
         <Link to="/cases/new" className="btn btn-primary">{t('casesList.newCase')}</Link>
       </div>
+      {actionError && (
+        <div className="error action-error">
+          <span>{actionError}</span>
+          <button className="btn btn-secondary" onClick={() => setActionError(null)}>{t('caseDetail.dismiss')}</button>
+        </div>
+      )}
       {cases.length === 0 ? (
         <div className="card">
           <p>{t('casesList.noCases')} <Link to="/cases/new">{t('casesList.createFirst')}</Link></p>
@@ -63,8 +70,8 @@ function CasesList() {
                   </p>
                   <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', fontSize: '0.9rem', color: '#888' }}>
                     <span>{t('casesList.cavity')}: {getCavityTypeLabel(caseItem.cavity_type)}</span>
-                    <span>Status: {caseItem.status || 'draft'}</span>
-                    {caseItem.project_id && <span>Project: {caseItem.project_id}</span>}
+                    <span>{t('casesList.status')}: {t(`caseStatus.${caseItem.status || 'draft'}`)}</span>
+                    {caseItem.project_id && <span>{t('casesList.project')}: {caseItem.project_id}</span>}
                     <span>{t('casesList.created')}: {new Date(caseItem.created_at).toLocaleDateString()}</span>
                     {caseItem.symptoms?.length > 0 && (
                       <span>{t('casesList.symptoms')}: {caseItem.symptoms.length}{t('casesList.symptomsCount')}</span>

@@ -12,7 +12,7 @@ TOOL_CHAT = "chat"
 TOOL_PLAN = "generate_plan"
 TOOL_TROUBLESHOOTING = "generate_troubleshooting"
 TOOL_REPORT = "generate_report"
-TOOL_RESONATOR = "generate_resonator_draft"
+TOOL_CAVITY_DESIGN = "compute_cavity_design"
 TOOL_STABILITY = "run_stability_analysis"
 TOOL_BEAM_PROFILE = "run_beam_profile_analysis"
 TOOL_SPECTRUM = "run_spectrum_analysis"
@@ -24,7 +24,7 @@ ALL_TOOLS = [
     TOOL_PLAN,
     TOOL_TROUBLESHOOTING,
     TOOL_REPORT,
-    TOOL_RESONATOR,
+    TOOL_CAVITY_DESIGN,
     TOOL_STABILITY,
     TOOL_BEAM_PROFILE,
     TOOL_SPECTRUM,
@@ -60,11 +60,11 @@ _REPORT_PATTERNS = [
     r"data summary", r"results summary",
 ]
 
-_RESONATOR_PATTERNS = [
-    r"rezonator", r"腔稳定性", r"腔长", r"曲率半径", r"仿真输入",
+_CAVITY_DESIGN_PATTERNS = [
     r"谐振腔", r"腔型设计", r"腔模", r"beam waist", r"腔参数",
+    r"腔稳定性", r"腔长", r"曲率半径", r"束腰", r"稳区",
     r"resonator", r"cavity stability", r"cavity length", r"radius of curvature",
-    r"simulation input", r"cavity design", r"mode calculation",
+    r"cavity design", r"mode calculation",
 ]
 
 _STABILITY_PATTERNS = [
@@ -99,7 +99,7 @@ def _compile(patterns: list[str]) -> re.Pattern[str]:
 _RE_PLAN = _compile(_PLAN_PATTERNS)
 _RE_TROUBLESHOOTING = _compile(_TROUBLESHOOTING_PATTERNS)
 _RE_REPORT = _compile(_REPORT_PATTERNS)
-_RE_RESONATOR = _compile(_RESONATOR_PATTERNS)
+_RE_CAVITY_DESIGN = _compile(_CAVITY_DESIGN_PATTERNS)
 _RE_STABILITY = _compile(_STABILITY_PATTERNS)
 _RE_BEAM_PROFILE = _compile(_BEAM_PROFILE_PATTERNS)
 _RE_SPECTRUM = _compile(_SPECTRUM_PATTERNS)
@@ -133,7 +133,7 @@ def _rule_route(text: str) -> RouteResult | None:
         (TOOL_SPECTRUM, _RE_SPECTRUM),
         (TOOL_COMPONENTS, _RE_COMPONENTS),
         (TOOL_MODULE_MANAGEMENT, _RE_MODULES),
-        (TOOL_RESONATOR, _RE_RESONATOR),
+        (TOOL_CAVITY_DESIGN, _RE_CAVITY_DESIGN),
         (TOOL_TROUBLESHOOTING, _RE_TROUBLESHOOTING),
         (TOOL_REPORT, _RE_REPORT),
         (TOOL_PLAN, _RE_PLAN),

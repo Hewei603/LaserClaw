@@ -1,6 +1,7 @@
 """Content generation API routes."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from time import perf_counter
 from typing import Any, Awaitable
@@ -13,9 +14,10 @@ from ..auth.security import Principal, get_current_principal
 from ..database import get_db
 from ..knowledge.ingestion import create_generated_content_source
 from ..knowledge.retrieval import results_to_citations, search_case_and_global_knowledge
-from ..models import ExperimentCase, GeneratedContent, PromptVersion
+from ..models import ExperimentCase, GeneratedContent, InventoryItem, PromptVersion
 from ..observability.audit import record_audit
 from ..observability.usage import apply_usage_to_generated
+from ..physics.case_context import compute_case_physics
 from ..providers import get_ai_provider
 from ..schemas import GeneratedContentResponse, GenerateRequest
 
@@ -30,8 +32,32 @@ def _get_case_or_404(case_id: int, db: Session) -> ExperimentCase:
     return case
 
 
-def _full_case_data(case: ExperimentCase) -> dict[str, Any]:
-    return {
+def _inventory_rocs(db: Session) -> list | None:
+    """Mirror radii the lab actually owns, for the cavity design search.
+
+    A design built from mirrors nobody has is useless, so when the inventory has
+    been imported the search is constrained to real stock (flat mirrors
+    included). Returns None when the inventory is empty, letting the search fall
+    back to a vendor catalogue.
+
+    Mirrors only: a lens surface of radius R has f = R/(n-1), not R/2, so lens
+    radii are not interchangeable cavity mirror radii — and a lens carries no HR
+    coating.
+    """
+    rows = (
+        db.query(InventoryItem.roc_mm, InventoryItem.roc_is_flat)
+        .filter(InventoryItem.category == "mirror", InventoryItem.condition != "damaged")
+        .distinct()
+        .all()
+    )
+    rocs: list = sorted({float(r) for r, flat in rows if r and not flat})
+    if any(flat for _, flat in rows):
+        rocs.append("flat")
+    return rocs or None
+
+
+def _full_case_data(case: ExperimentCase, *, physics: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = {
         "title": case.title,
         "description": case.description,
         "cavity_type": case.cavity_type,
@@ -39,6 +65,11 @@ def _full_case_data(case: ExperimentCase) -> dict[str, Any]:
         "parameters": case.parameters,
         "symptoms": case.symptoms,
     }
+    if physics is not None:
+        # Deterministic kernel first: the model writes prose around these numbers
+        # instead of inventing its own geometry.
+        data["computed_physics"] = physics
+    return data
 
 
 def _query_for(case: ExperimentCase, content_type: str) -> str:
@@ -127,26 +158,16 @@ async def generate_plan(
     case = _get_case_or_404(case_id, db)
     assert_case_edit(db, case, principal)
     provider = get_ai_provider()
-    content, latency_ms = await _run_generation("plan", provider.generate_plan(_full_case_data(case)))
+    # The cavity search is unbounded, user-controlled CPU work: compute it ONCE
+    # and off the event loop so one case cannot stall the whole server.
+    rocs = _inventory_rocs(db)
+    physics = await asyncio.to_thread(compute_case_physics, case.parameters, available_rocs=rocs)
+    content, latency_ms = await _run_generation(
+        "plan", provider.generate_plan(_full_case_data(case, physics=physics))
+    )
+    content["computed_physics"] = physics
     _augment_with_rag(case, "plan", content, request, db)
     return _save_generated_content(case_id, "plan", content, db, latency_ms=latency_ms)
-
-
-@router.post("/{case_id}/generate-rezonator", response_model=GeneratedContentResponse)
-async def generate_rezonator(
-    case_id: int,
-    request: GenerateRequest = GenerateRequest(),
-    db: Session = Depends(get_db),
-    principal: Principal = Depends(get_current_principal),
-):
-    """Generate a ReZonator schema draft."""
-    case = _get_case_or_404(case_id, db)
-    assert_case_edit(db, case, principal)
-    case_data = {"title": case.title, "cavity_type": case.cavity_type, "parameters": case.parameters}
-    provider = get_ai_provider()
-    content, latency_ms = await _run_generation("rezonator", provider.generate_rezonator_schema(case_data))
-    _augment_with_rag(case, "rezonator", content, request, db)
-    return _save_generated_content(case_id, "rezonator", content, db, latency_ms=latency_ms)
 
 
 @router.post("/{case_id}/generate-troubleshooting", response_model=GeneratedContentResponse)
