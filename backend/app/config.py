@@ -8,18 +8,55 @@ from typing import Optional
 from pydantic_settings import BaseSettings
 from pathlib import Path
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 
 # Look for .env next to the repo root as well as the current working directory,
 # so running uvicorn from backend/ still picks up the project-level config.
 # Tests set LASERCLAW_NO_DOTENV=1 so a developer's local .env (real API keys,
 # a different provider) can never change what the suite exercises.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+# Absolute paths only: a relative ".env" would make precedence depend on the
+# working directory, which is exactly what this indirection removes.
+# Later entries win, so a backend/.env can override the repo-root one.
 _ENV_FILES: tuple[str, ...] | None = (
     None
     if os.environ.get("LASERCLAW_NO_DOTENV")
-    else (str(_REPO_ROOT / ".env"), str(_REPO_ROOT / "backend" / ".env"), ".env")
+    else (str(_REPO_ROOT / ".env"), str(_REPO_ROOT / "backend" / ".env"))
 )
+
+# True inside the application container, where /app IS the project.
+# Deliberately POSIX-only: on Windows "/app" is a drive-relative path, so
+# Path("/app").is_dir() answers "does C:\\app exist" — and C:\\app is created by
+# the very misconfiguration this guard exists to catch, which would make the
+# check disable itself after the first stray upload.
+_IN_CONTAINER = os.name != "nt" and (Path("/app").is_dir() or Path("/.dockerenv").exists())
+
+
+def _resolve_data_path(value: str) -> str:
+    """Pin a data directory to the repo, not to whatever the CWD happens to be.
+
+    Two failure modes this removes, both of which are silent:
+
+    * A relative path such as ``./backend/vector_store`` resolves differently
+      depending on whether uvicorn was started from the repo root or from
+      ``backend/``. The launcher uses ``backend/``, so the RAG index written by
+      an ingestion run from the repo root would simply be invisible — retrieval
+      returns nothing and nothing errors.
+    * A container path such as ``/app/uploads`` (which every ``.env`` copied
+      from the compose file carries) is *absolute*, so on a local Windows run it
+      lands in ``C:\\app\\uploads`` — outside the project, silently.
+    """
+    text = str(value).strip()
+    if not text:
+        return text
+    path = Path(text)
+    if not _IN_CONTAINER:
+        parts = path.as_posix().lstrip("/").split("/")
+        if path.as_posix().startswith("/app/") and parts[:1] == ["app"]:
+            return str(_REPO_ROOT.joinpath(*parts[1:]))
+    if path.is_absolute():
+        return str(path)
+    return str((_REPO_ROOT / path).resolve())
 
 
 class Settings(BaseSettings):
@@ -89,6 +126,11 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
+
+    @field_validator("upload_dir", "vector_store_dir")
+    @classmethod
+    def _pin_to_repo(cls, value: str) -> str:
+        return _resolve_data_path(value)
 
     model_config = ConfigDict(env_file=_ENV_FILES, extra="ignore")
 

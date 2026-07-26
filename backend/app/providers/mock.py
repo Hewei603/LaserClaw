@@ -79,7 +79,7 @@ class MockProvider(AIProvider):
                 "Conclusion": "pending",
                 "Improvement Suggestions": "pending",
             },
-            "attachments_note": "Attach raw measurements, photos, and ReZonator files.",
+            "attachments_note": "Attach raw measurements, photos, and cavity design files.",
         }
 
     async def generate_chat_response(self, context: Dict[str, Any]) -> Dict[str, Any]:

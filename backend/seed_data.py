@@ -108,15 +108,6 @@ async def generate_content_for_case(db: Session, case: ExperimentCase):
     )
     db.add(plan)
 
-    # 生成ReZonator模式
-    rezonator_content = await provider.generate_rezonator_schema(case_data)
-    rezonator = GeneratedContent(
-        case_id=case.id,
-        content_type="rezonator",
-        content=rezonator_content
-    )
-    db.add(rezonator)
-
     # 如果有症状，生成故障排查
     if case.symptoms:
         troubleshooting_content = await provider.generate_troubleshooting(

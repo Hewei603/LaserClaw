@@ -308,7 +308,6 @@ async def benchmark_llm(*, enabled: bool) -> dict[str, Any]:
     tasks = [
         ("plan", provider.generate_plan(case_data)),
         ("troubleshooting", provider.generate_troubleshooting(case_data["symptoms"], case_data)),
-        ("rezonator", provider.generate_rezonator_schema(case_data)),
         ("report", provider.generate_report(case_data)),
     ]
     rows = []

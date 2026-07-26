@@ -315,7 +315,6 @@ Core endpoints:
 - `POST /api/cases/{case_id}/generate-plan`
 - `POST /api/cases/{case_id}/generate-troubleshooting`
 - `POST /api/cases/{case_id}/generate-report`
-- `POST /api/cases/{case_id}/generate-rezonator`
 - `POST /api/knowledge/sources/upload`
 - `GET /api/knowledge/sources`
 - `PATCH /api/knowledge/sources/{source_id}/governance`
