@@ -1,6 +1,7 @@
 """Stateful Agent orchestrator."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -8,9 +9,11 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..knowledge.ingestion import create_generated_content_source
+from ..inventory.evaluator import evaluate_candidates
 from ..models import AgentStep, AgentTask, CaseModule, ExperimentCase, GeneratedContent
 from ..observability.audit import record_audit
 from ..observability.usage import apply_usage_to_generated
+from ..physics.case_context import compute_case_physics
 from ..providers import get_ai_provider
 from .guardrails import assess_risk
 from .planner import build_plan
@@ -22,12 +25,14 @@ from .tools import (
     list_case_modules_payload,
     list_generated_contents_payload,
     record_tool_call,
+    run_physics_tool_payload,
     save_generated_content_payload,
     search_payload,
 )
 
 logger = logging.getLogger(__name__)
-MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management"}
+PHYSICS_MODES = {"cavity_design", "phase_match", "coating_tmm"}
+MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management", "component_match", "power_curve"} | PHYSICS_MODES
 
 
 async def create_and_run_task(
@@ -93,7 +98,7 @@ async def create_and_run_task(
             lambda: search_payload(db, goal, case_id, 5, task.id),
         )
         steps[1].status = "completed"
-        steps[1].result_summary = f"Retrieved {len(retrieval['results'])} knowledge chunks."
+        steps[1].result_summary = f"检索到 {len(retrieval['results'])} 条相关知识片段。"
 
         if mode in MODULE_MODES:
             if case is None:
@@ -118,7 +123,7 @@ async def create_and_run_task(
                 lambda: save_generated_content_payload(generated),
             )
             steps[3].status = "completed"
-            steps[3].result_summary = "Module result saved as generated content."
+            steps[3].result_summary = "模块结果已保存为生成内容。"
             task.status = "completed"
             task.final_content_id = generated.id
             record_audit(db, action="agent_task.complete", resource_type="agent_task", resource_id=str(task.id))
@@ -175,12 +180,20 @@ async def create_and_run_task(
         db.refresh(task)
         return task
     except Exception:
-        task.status = "failed"
-        for step in steps:
-            if step.status == "pending":
-                step.status = "failed"
-                break
-        record_audit(db, action="agent_task.failed", resource_type="agent_task", resource_id=str(task.id))
+        # Discard every partial write from this run (half-built modules,
+        # component items, generated content, retrieval rows, and the original
+        # flushed task/steps) instead of committing them alongside the failure.
+        db.rollback()
+        failed_task = AgentTask(
+            case_id=case_id,
+            goal=goal,
+            mode=mode,
+            risk_level=risk_level,
+            status="failed",
+        )
+        db.add(failed_task)
+        db.flush()
+        record_audit(db, action="agent_task.failed", resource_type="agent_task", resource_id=str(failed_task.id))
         db.commit()
         raise
 
@@ -246,6 +259,34 @@ def _run_module_task(
             "summary": "Agent generated or refreshed the case component list.",
             "item_count": len(output["items"]),
         }
+    elif module.module_type in PHYSICS_MODES:
+        # Deterministic physics compute: case parameters overlaid by module config.
+        merged_config = {**(case.parameters or {}), **(module.config_json or {})}
+        output = record_tool_call(
+            db,
+            task,
+            steps[2].id,
+            f"compute_{module.module_type}",
+            {"module_id": module.id, "config": merged_config},
+            lambda: run_physics_tool_payload(module.module_type, merged_config),
+        )
+        module.status = output.get("status", "failed")
+        module.result_json = output
+    elif module.module_type == "component_match":
+        # Deterministic L1 inventory evaluation against the case's requirement spec.
+        stored_req = (case.parameters or {}).get("component_requirement")
+        merged_config = {**(stored_req if isinstance(stored_req, dict) else {}),
+                         **(module.config_json or {})}
+        output = record_tool_call(
+            db,
+            task,
+            steps[2].id,
+            "match_components",
+            {"module_id": module.id, "requirement": merged_config},
+            lambda: evaluate_candidates(db, merged_config),
+        )
+        module.status = output.get("status", "failed")
+        module.result_json = output
     else:
         output = record_tool_call(
             db,
@@ -259,9 +300,9 @@ def _run_module_task(
         module.result_json = output
 
     steps[2].status = "completed"
-    steps[2].result_summary = module.result_json.get("summary") or module.result_json.get("message") or "Module workflow updated."
+    steps[2].result_summary = module.result_json.get("summary") or module.result_json.get("message") or "模块工作流已更新。"
     return {
-        "disclaimer": "Module output is an auditable workspace artifact. Experimental decisions still require qualified human review.",
+        "disclaimer": "模块输出为可审计的工作区制品;实验决策仍需具备资质的人员复核。",
         "agent_task_id": task.id,
         "module_id": module.id,
         "module_type": module.module_type,
@@ -275,20 +316,21 @@ def _run_module_task(
 
 def _module_needs_inputs_payload(module: CaseModule) -> dict[str, Any]:
     required = {
-        "stability": "Upload a power meter photo ZIP and provide ROI x,y,w,h, then run the stability module.",
-        "beam_profile": "Upload a BeamGage JPG/BMP/PNG export, then run the beam profile module.",
-        "spectrum": "Upload a spectrum CSV/TXT data file, then run the spectrum module.",
+        "stability": "请上传功率计照片 ZIP 并提供 ROI(x,y,w,h),然后运行稳定性模块。",
+        "beam_profile": "请上传 BeamGage 导出的 JPG/BMP/PNG 光斑图,然后运行光斑分析模块。",
+        "spectrum": "请上传光谱数据 CSV/TXT 文件,然后运行光谱模块。",
+        "power_curve": "请上传两列(泵浦功率, 输出功率)数据文件,或在参数框 config.data 中内联数组,然后运行功率曲线模块。",
     }
     if module.files:
         return {
             "status": "ready",
-            "summary": "Module has input files. Run the module from the Case Modules tab to execute file analysis.",
+            "summary": "模块已有输入文件。请到案例的「模块」标签页点「运行」执行分析。",
             "input_files": [{"id": item.id, "filename": item.filename, "role": item.file_role} for item in module.files],
         }
     return {
         "status": "needs_input",
-        "message": required.get(module.module_type, "Add module inputs before running analysis."),
-        "summary": "Agent created the module and is waiting for user-provided experimental files or parameters.",
+        "message": required.get(module.module_type, "请先补充模块输入,再运行分析。"),
+        "summary": "Agent 已创建模块,等待你提供实验文件或参数。",
     }
 
 
@@ -304,10 +346,20 @@ async def _generate_artifact(
     if extra_context:
         payload["agent_context"] = extra_context
     payload["user_request"] = goal
+    if mode == "plan":
+        # Same inventory-constrained search as the REST path, so the two never
+        # disagree about the recommended cavity.
+        payload["computed_physics"] = await asyncio.to_thread(
+            compute_case_physics, payload.get("parameters"),
+            available_rocs=payload.pop("_available_rocs", None),
+        )
     if mode == "troubleshooting":
         return await provider.generate_troubleshooting(payload.get("symptoms", []), payload)
     if mode == "report":
         return await provider.generate_report(payload)
-    if mode == "rezonator":
-        return await provider.generate_rezonator_schema(payload)
+    if mode not in ("plan", "chat"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported generation mode '{mode}'",
+        )
     return await provider.generate_plan({**payload, "goal": goal})

@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ..auth.acl import can_manage_knowledge
+from ..auth.acl import accessible_case_ids, can_manage_knowledge
 from ..auth.security import Principal, get_current_principal
 from ..database import get_db
 from ..evals.datasets import load_jsonl_dataset
@@ -28,9 +28,16 @@ def _run_dataset(
     principal: Principal,
 ) -> RagEvalRun:
     rows: list[dict] = []
+    allowed_case_ids = accessible_case_ids(db, principal)
     for index, item in enumerate(dataset, start=1):
         item = {**item, "id": item.get("id") or f"row-{index}"}
-        run, results = search_knowledge(db, query=item["query"], case_id=item.get("case_id"), top_k=top_k)
+        run, results = search_knowledge(
+            db,
+            query=item["query"],
+            case_id=item.get("case_id"),
+            top_k=top_k,
+            allowed_case_ids=allowed_case_ids,
+        )
         row = evaluate_retrieval_row(item, [result.model_dump() for result in results], run)
         row["retrieval_run_id"] = run.id
         rows.append(row)
@@ -59,7 +66,13 @@ async def run_rag_eval(
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
 ):
-    """Run a lightweight retrieval benchmark against an inline dataset."""
+    """Run a lightweight retrieval benchmark against an inline dataset.
+
+    Retrieval is scoped to the caller's accessible cases so an eval run cannot be
+    used as an oracle to probe knowledge in cases the caller cannot read.
+    """
+    if not can_manage_knowledge(principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or reviewer role required")
     eval_run = _run_dataset(
         db,
         name=payload.name,
@@ -67,7 +80,14 @@ async def run_rag_eval(
         top_k=payload.top_k,
         principal=principal,
     )
-    record_audit(db, action="rag_eval.run", resource_type="rag_eval_run", resource_id=str(eval_run.id))
+    record_audit(
+        db,
+        action="rag_eval.run",
+        resource_type="rag_eval_run",
+        resource_id=str(eval_run.id),
+        actor=principal.actor,
+        user_id=principal.user_id,
+    )
     db.commit()
     db.refresh(eval_run)
     return eval_run
@@ -111,5 +131,8 @@ async def list_rag_evals(
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
 ):
-    _ = principal
-    return db.query(RagEvalRun).order_by(RagEvalRun.created_at.desc()).limit(limit).all()
+    """List eval runs. Reviewers/admins see all runs; other callers see only their own."""
+    query = db.query(RagEvalRun)
+    if not can_manage_knowledge(principal):
+        query = query.filter(RagEvalRun.created_by_id == principal.user_id)
+    return query.order_by(RagEvalRun.created_at.desc()).limit(limit).all()

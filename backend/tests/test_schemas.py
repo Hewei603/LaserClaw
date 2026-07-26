@@ -5,7 +5,6 @@ from __future__ import annotations
 from app.agent.schemas import (
     ExperimentPlanSchema,
     ExperimentReportSchema,
-    ResonatorDraftSchema,
     TroubleshootingSchema,
     validate_and_repair,
     validate_artifact,
@@ -91,30 +90,6 @@ class TestExperimentReportSchema:
         assert schema.title == "[Report title not provided]"
 
 
-class TestResonatorDraftSchema:
-    def test_full_valid_resonator(self):
-        data = {
-            "cavity_type": "linear",
-            "components": ["HR mirror", "Nd:YAG crystal", "OC mirror"],
-            "distances": {"crystal_to_HR": 50, "crystal_to_OC": 100},
-            "crystal_position": "Center of cavity",
-            "parameters_to_scan": ["cavity_length", "OC_reflectivity"],
-            "simulation_notes": "Use ReZonator 2.0",
-        }
-        schema = ResonatorDraftSchema.model_validate(data)
-        assert schema.cavity_type == "linear"
-        assert len(schema.components) == 3
-
-    def test_empty_cavity_type_defaults_to_linear(self):
-        data = {"cavity_type": ""}
-        schema = ResonatorDraftSchema.model_validate(data)
-        assert schema.cavity_type == "linear"
-
-    def test_missing_cavity_type_defaults_to_linear(self):
-        schema = ResonatorDraftSchema.model_validate({})
-        assert schema.cavity_type == "linear"
-
-
 class TestValidateAndRepair:
     def test_plan_passes_with_full_data(self):
         data = {
@@ -169,6 +144,3 @@ class TestValidateArtifact:
         assert "possible_causes" in repaired
         assert repaired["possible_causes"]  # non-empty after repair
 
-    def test_resonator_always_has_cavity_type(self):
-        repaired = validate_artifact("rezonator", {})
-        assert repaired["cavity_type"] == "linear"

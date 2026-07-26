@@ -95,7 +95,7 @@ class GenerateRequest(BaseModel):
 
 
 class CaseModuleCreate(BaseModel):
-    module_type: str = Field(..., pattern="^(stability|beam_profile|spectrum|components)$")
+    module_type: str = Field(..., pattern="^(stability|beam_profile|spectrum|components|cavity_design|phase_match|coating_tmm|component_match|power_curve)$")
     title: Optional[str] = None
     config_json: Dict[str, Any] = Field(default_factory=dict)
 
@@ -238,7 +238,7 @@ class KnowledgeSearchResponse(BaseModel):
 class AgentTaskCreate(BaseModel):
     case_id: Optional[int] = None
     goal: str = Field(..., min_length=1)
-    mode: str = Field(default="troubleshooting", pattern="^(troubleshooting|plan|report|rezonator|stability|beam_profile|spectrum|components|module_management)$")
+    mode: str = Field(default="troubleshooting", pattern="^(troubleshooting|plan|report|stability|beam_profile|spectrum|components|module_management|cavity_design|phase_match|coating_tmm|component_match|power_curve)$")
     require_citations: bool = True
 
 
@@ -246,7 +246,7 @@ class AgentChatRequest(BaseModel):
     session_id: Optional[int] = None
     message: str = Field(..., min_length=1)
     case_id: Optional[int] = None
-    mode: str = Field(default="auto", pattern="^(auto|chat|troubleshooting|plan|report|rezonator|stability|beam_profile|spectrum|components|module_management)$")
+    mode: str = Field(default="auto", pattern="^(auto|chat|troubleshooting|plan|report|stability|beam_profile|spectrum|components|module_management|cavity_design|phase_match|coating_tmm|component_match|power_curve)$")
     require_citations: bool = True
 
 
@@ -471,3 +471,74 @@ class RagEvalRunResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- Structured optics inventory (L0) + component matching (L1) -------------
+
+class CoatingSpecResponse(BaseModel):
+    id: int
+    surface: str
+    wl_min_nm: float
+    wl_max_nm: float
+    function: str
+    value_type: Optional[str] = None
+    comparator: Optional[str] = None
+    value_pct: Optional[float] = None
+    raw_fragment: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InventoryItemResponse(BaseModel):
+    id: int
+    category: str
+    name: str
+    diameter_mm: Optional[float] = None
+    roc_mm: Optional[float] = None
+    roc_is_flat: Optional[bool] = None
+    thickness_mm: Optional[float] = None
+    dimensions: Optional[str] = None
+    cut_angle_theta_deg: Optional[float] = None
+    cut_angle_phi_deg: Optional[float] = None
+    cut_axis: Optional[str] = None
+    doping_pct: Optional[float] = None
+    material: Optional[str] = None
+    quantity: Optional[float] = None
+    location: Optional[str] = None
+    keeper: Optional[str] = None
+    vendor: Optional[str] = None
+    raw_spec: Optional[str] = None
+    parse_confidence: Optional[str] = None
+    parse_notes: Optional[List[str]] = None
+    condition: Optional[str] = None
+    coatings: List[CoatingSpecResponse] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InventoryImportResponse(BaseModel):
+    source_file: str
+    total_rows: int
+    imported: int
+    needs_review: int
+    partial: int
+    skipped_empty: int
+    coating_bands: int
+    review_queue: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class SurfaceRequirement(BaseModel):
+    wavelength_nm: float = Field(..., gt=100, lt=5000)
+    function: str = Field(..., pattern="^(?i)(HR|AR|HT|PR)$")
+    min_R_pct: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class ComponentMatchRequest(BaseModel):
+    role: str = Field(default="component", max_length=120)
+    category: Optional[str] = None
+    surfaces: List[SurfaceRequirement] = Field(default_factory=list)
+    roc_mm: Optional[Any] = None          # number or "flat"
+    roc_tol_pct: float = Field(default=2.0, ge=0, le=50)
+    min_diameter_mm: Optional[float] = Field(default=None, gt=0)
+    quantity: float = Field(default=1, gt=0)
+    max_results: int = Field(default=10, ge=1, le=50)

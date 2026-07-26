@@ -24,7 +24,9 @@ from ..config import get_settings
 from ..database import get_db
 from ..knowledge.ingestion import create_generated_content_source
 from ..models import CaseComponentItem, CaseModule, CaseModuleFile, ExperimentCase, GeneratedContent
+from ..inventory.evaluator import evaluate_candidates
 from ..observability.audit import record_audit
+from ..physics.toolkit import run_cavity_design, run_coating_tmm, run_phase_match
 from ..schemas import (
     CaseComponentItemCreate,
     CaseComponentItemResponse,
@@ -44,6 +46,11 @@ MODULE_LABELS = {
     "beam_profile": "Beam profile analysis",
     "spectrum": "Spectrum analysis",
     "components": "Case component list",
+    "cavity_design": "Cavity design (ABCD)",
+    "phase_match": "Phase matching",
+    "coating_tmm": "Coating TMM analysis",
+    "component_match": "Component matching (inventory)",
+    "power_curve": "Power transfer curve (threshold & slope)",
 }
 MODULE_EXTENSIONS = {".zip", ".csv", ".txt", ".tsv", ".json", ".jpg", ".jpeg", ".png", ".bmp", ".pdf", ".npy"}
 
@@ -77,7 +84,7 @@ def _module_upload_path(module_id: int, filename: str) -> tuple[str, str]:
     if ext not in MODULE_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported module file type. Allowed: {', '.join(sorted(MODULE_EXTENSIONS))}",
+            detail=f"不支持的文件类型,可用:{', '.join(sorted(MODULE_EXTENSIONS))}",
         )
     safe_name = f"{uuid.uuid4()}{ext}"
     root = os.path.abspath(os.path.join(settings.upload_dir, "case_modules", str(module_id)))
@@ -144,14 +151,14 @@ def _save_module_generated_content(db: Session, module: CaseModule, result: dict
 def _analyze_spectrum(module: CaseModule) -> dict[str, Any]:
     data_file = _first_file(module, {".csv", ".txt", ".tsv"})
     if not data_file:
-        return {"status": "needs_input", "message": "Upload a spectrum data CSV/TXT file before running analysis."}
+        return {"status": "needs_input", "message": "请先上传光谱数据文件(CSV/TXT),再运行分析。"}
 
     delimiter = "\t" if os.path.splitext(data_file.filename)[1].lower() == ".tsv" else ","
     with open(data_file.filepath, "r", encoding="utf-8", errors="ignore") as handle:
         sample = handle.read()
     rows = list(csv.reader(StringIO(sample), delimiter=delimiter))
     if len(rows) < 2:
-        return {"status": "failed", "message": "Spectrum file does not contain enough rows."}
+        return {"status": "failed", "message": "光谱文件的数据行数不足,请检查文件内容。"}
 
     header = [cell.strip().lower() for cell in rows[0]]
     x_index = next((i for i, name in enumerate(header) if any(key in name for key in ["wave", "lambda", "nm"])), 0)
@@ -163,7 +170,7 @@ def _analyze_spectrum(module: CaseModule) -> dict[str, Any]:
         except (ValueError, IndexError):
             continue
     if not points:
-        return {"status": "failed", "message": "No numeric wavelength/intensity rows were found."}
+        return {"status": "failed", "message": "没有找到数值型的(波长, 强度)数据行,请检查文件格式。"}
 
     peak_wavelength, peak_intensity = max(points, key=lambda item: item[1])
     total = sum(max(y, 0.0) for _, y in points)
@@ -190,7 +197,7 @@ def _analyze_spectrum(module: CaseModule) -> dict[str, Any]:
 def _analyze_beam_profile(module: CaseModule) -> dict[str, Any]:
     image_file = _first_file(module, {".jpg", ".jpeg", ".png", ".bmp"})
     if not image_file:
-        return {"status": "needs_input", "message": "Upload a BeamGage JPG/BMP/PNG export before running analysis."}
+        return {"status": "needs_input", "message": "请先上传 BeamGage 导出的 JPG/BMP/PNG 光斑图,再运行分析。"}
     result: dict[str, Any] = {
         "status": "completed",
         "input_file_id": image_file.id,
@@ -218,10 +225,192 @@ def _analyze_beam_profile(module: CaseModule) -> dict[str, Any]:
     return result
 
 
+PHYSICS_MODULE_TYPES = {"cavity_design", "phase_match", "coating_tmm"}
+
+
+def _load_curve_csv(filepath: str) -> dict[str, Any] | None:
+    """Load a vendor reflectance curve CSV (columns: wavelength_nm, R [, T])."""
+    try:
+        wl: list[float] = []
+        r_vals: list[float] = []
+        t_vals: list[float] = []
+        with open(filepath, encoding="utf-8-sig", newline="") as fh:
+            for row in csv.reader(fh):
+                if len(row) < 2:
+                    continue
+                try:
+                    wl.append(float(row[0]))
+                    r_vals.append(float(row[1]))
+                    if len(row) > 2 and row[2].strip():
+                        t_vals.append(float(row[2]))
+                except ValueError:
+                    continue  # header or malformed row
+        if not wl:
+            return None
+        curve: dict[str, Any] = {"wl_nm": wl, "R": r_vals, "source": os.path.basename(filepath)}
+        if len(t_vals) == len(wl):
+            curve["T"] = t_vals
+        return curve
+    except OSError:
+        return None
+
+
+def _split_data_line(line: str) -> list[str]:
+    """Split one data line on comma, tab, semicolon, or whitespace."""
+    for sep in (",", "\t", ";"):
+        if sep in line:
+            return [part.strip() for part in line.split(sep)]
+    return line.split()
+
+
+def _load_xy_csv(filepath: str) -> tuple[list[float], list[float]] | None:
+    """Load a two-column numeric data file (pump, output); headers skipped.
+
+    Accepts .csv/.tsv/.txt with comma, tab, semicolon, or whitespace separators
+    (all are advertised upload formats), so the delimiter is detected per line
+    rather than assumed from the extension.
+    """
+    try:
+        xs: list[float] = []
+        ys: list[float] = []
+        with open(filepath, encoding="utf-8-sig", newline="") as fh:
+            for line in fh:
+                parts = _split_data_line(line.strip())
+                if len(parts) < 2:
+                    continue
+                try:
+                    xs.append(float(parts[0]))
+                    ys.append(float(parts[1]))
+                except ValueError:
+                    continue  # header or malformed row
+        return (xs, ys) if len(xs) >= 3 else None
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _run_power_curve(module: CaseModule, db: Session, config: dict[str, Any]) -> dict[str, Any]:
+    """Fit a measured output-vs-pump power curve; compare across the case's series.
+
+    Data comes from either an uploaded two-column CSV/TXT input file or inline
+    ``config.data = {"pump": [...], "output": [...]}``.  Tag each series with
+    ``config.output_coupler_T_pct`` to unlock Findlay-Clay / Caird loss analysis
+    across sibling power_curve modules of the same case.
+    """
+    from ..physics.laser_metrics import caird, findlay_clay, fit_power_curve
+
+    def _coupler_pct(value: Any) -> float | None:
+        """Coerce a user-supplied output-coupler transmission to 0-100, else None."""
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            pct = float(value)
+        except (TypeError, ValueError):
+            return None
+        return pct if 0.0 <= pct <= 100.0 else None
+
+    inline = config.get("data") or {}
+    pump = inline.get("pump")
+    output = inline.get("output")
+    source: str | None = "inline"
+    if not (pump and output):
+        data_file = _first_file(module, {".csv", ".txt", ".tsv"})
+        if data_file is None:
+            return {"status": "needs_input",
+                    "message": "上传两列数据文件(泵浦功率, 输出功率)或在 config.data 中内联 pump/output 数组。"}
+        loaded = _load_xy_csv(data_file.filepath)
+        if loaded is None:
+            return {"status": "failed", "message": "数据文件无法解析出至少 3 行两列数值。"}
+        pump, output = loaded
+        source = data_file.filename
+
+    fit = fit_power_curve(pump, output)
+    if fit.get("status") != "completed":
+        return fit
+
+    units = {"pump": config.get("pump_unit", "W"), "output": config.get("output_unit", "W")}
+    # keep a (downsampled) copy of the measured points so the UI can plot them
+    step = max(1, len(pump) // 120)
+    points = {"pump": [round(float(p), 4) for p in pump[::step]],
+              "output": [round(float(o), 4) for o in output[::step]]}
+    result: dict[str, Any] = {
+        "status": "completed",
+        "tool": "power_curve",
+        "data": points,
+        "series_label": config.get("label") or module.title,
+        "output_coupler_T_pct": _coupler_pct(config.get("output_coupler_T_pct")),
+        "units": units,
+        "data_source": source,
+        "n_points": fit["points_total"],
+        "fit": fit,
+        "summary": (
+            f"阈值 {fit['threshold_pump']} {units['pump']}, "
+            f"斜率效率 {fit['slope_efficiency_pct']}% (R²={fit['r_squared']})"
+        ),
+    }
+
+    # Cross-series comparison within this case (the measurement-feedback loop).
+    siblings = (
+        db.query(CaseModule)
+        .filter(CaseModule.case_id == module.case_id, CaseModule.module_type == "power_curve")
+        .all()
+    )
+    series = []
+    for sib in siblings:
+        res = sib.result_json or {}
+        sib_fit = res.get("fit") or {}
+        entry = {
+            "module_id": sib.id,
+            "label": res.get("series_label") or sib.title,
+            "output_coupler_T_pct": _coupler_pct(res.get("output_coupler_T_pct")),
+            "threshold_pump": (fit if sib.id == module.id else sib_fit).get("threshold_pump"),
+            "slope_efficiency": (fit if sib.id == module.id else sib_fit).get("slope_efficiency"),
+            "slope_efficiency_pct": (fit if sib.id == module.id else sib_fit).get("slope_efficiency_pct"),
+        }
+        if sib.id == module.id:
+            entry["output_coupler_T_pct"] = _coupler_pct(config.get("output_coupler_T_pct"))
+        if entry["threshold_pump"] is not None:
+            series.append(entry)
+    if len(series) > 1:
+        result["comparison"] = sorted(series, key=lambda s: (s["output_coupler_T_pct"] is None,
+                                                             s["output_coupler_T_pct"] or 0.0))
+        fc = findlay_clay(series)
+        cd = caird(series)
+        if fc:
+            result["findlay_clay"] = fc
+        if cd:
+            result["caird"] = cd
+        if fc and fc.get("applicable"):
+            result["summary"] += f"; Findlay-Clay 腔内往返损耗 ≈ {fc['round_trip_loss_pct']}%"
+
+    return result
+
+
+def _run_physics_module(module: CaseModule, case: ExperimentCase, config: dict[str, Any]) -> dict[str, Any]:
+    """Run one of the deterministic physics tools (in-process, no subprocess).
+
+    The effective config is the case's experiment parameters overlaid by the
+    module's own config, so a case that carries cavity/crystal parameters can be
+    computed without re-entering them per module run.
+    """
+    merged = {**(case.parameters or {}), **(config or {})}
+    if module.module_type == "cavity_design":
+        return run_cavity_design(merged)
+    if module.module_type == "phase_match":
+        return run_phase_match(merged)
+    # coating_tmm: an uploaded CSV input file becomes the vendor curve.
+    if not merged.get("vendor_curve"):
+        curve_file = _first_file(module, {".csv"})
+        if curve_file:
+            curve = _load_curve_csv(curve_file.filepath)
+            if curve:
+                merged["vendor_curve"] = curve
+    return run_coating_tmm(merged)
+
+
 def _run_stability(module: CaseModule, db: Session, config: dict[str, Any]) -> dict[str, Any]:
     zip_file = _first_file(module, {".zip"})
     if not zip_file:
-        return {"status": "needs_input", "message": "Upload a ZIP of power meter photos before running stability analysis."}
+        return {"status": "needs_input", "message": "请先上传功率计照片的 ZIP 压缩包,再运行稳定性分析。"}
 
     roi = config.get("roi")
     if isinstance(roi, str):
@@ -231,13 +420,13 @@ def _run_stability(module: CaseModule, db: Session, config: dict[str, Any]) -> d
     else:
         return {
             "status": "needs_roi",
-            "message": "Provide ROI as x,y,w,h. Automatic ROI detection is planned, but manual ROI is required for this run.",
+            "message": "请提供 ROI(格式 x,y,w,h,即读数区域在照片中的位置)。本次运行需要手动指定 ROI。",
             "input_file_id": zip_file.id,
         }
 
     app_path = Path(__file__).resolve().parents[3] / "PowerMeterReader_App" / "PowerMeterReader.py"
     if not app_path.exists():
-        return {"status": "failed", "message": "PowerMeterReader_App/PowerMeterReader.py was not found."}
+        return {"status": "failed", "message": "未找到 PowerMeterReader_App/PowerMeterReader.py(稳定性分析依赖该脚本)。"}
 
     output_root = Path(settings.upload_dir).resolve() / "case_modules" / str(module.id) / f"stability_{uuid.uuid4().hex[:8]}"
     output_root.mkdir(parents=True, exist_ok=True)
@@ -257,11 +446,17 @@ def _run_stability(module: CaseModule, db: Session, config: dict[str, Any]) -> d
         "--ylabel",
         str(config.get("ylabel", "Power")),
     ]
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=300)
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "failed",
+            "message": "PowerMeterReader 运行超时(300 秒),请检查压缩包内容与 ROI 设置。",
+        }
     if completed.returncode != 0:
         return {
             "status": "failed",
-            "message": "PowerMeterReader failed.",
+            "message": "PowerMeterReader 运行失败,详见 stderr 输出。",
             "stdout": completed.stdout[-2000:],
             "stderr": completed.stderr[-2000:],
         }
@@ -451,7 +646,7 @@ async def upload_module_file(
     _, filepath = _module_upload_path(module.id, file.filename or "")
     content = await file.read()
     if len(content) > settings.max_upload_size:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds max upload size")
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="文件超过大小上限(50MB)")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, "wb") as handle:
         handle.write(content)
@@ -510,6 +705,16 @@ async def run_case_module(
         result = _analyze_spectrum(module)
     elif module.module_type == "beam_profile":
         result = _analyze_beam_profile(module)
+    elif module.module_type in PHYSICS_MODULE_TYPES:
+        case = _get_case_or_404(db, module.case_id)
+        result = _run_physics_module(module, case, config)
+    elif module.module_type == "component_match":
+        case = _get_case_or_404(db, module.case_id)
+        stored_req = (case.parameters or {}).get("component_requirement")
+        merged = {**(stored_req if isinstance(stored_req, dict) else {}), **(config or {})}
+        result = evaluate_candidates(db, merged)
+    elif module.module_type == "power_curve":
+        result = _run_power_curve(module, db, config)
     elif module.module_type == "components":
         case = _get_case_or_404(db, module.case_id)
         existing = db.query(CaseComponentItem).filter(CaseComponentItem.module_id == module.id).count()
@@ -518,7 +723,7 @@ async def run_case_module(
                 db.add(CaseComponentItem(**item))
         result = {"status": "completed", "summary": "Case component list generated from case context.", "generated_items": existing or 8}
     else:
-        result = {"status": "failed", "message": f"Unsupported module type {module.module_type}"}
+        result = {"status": "failed", "message": f"不支持的模块类型 {module.module_type}"}
 
     module.result_json = result
     module.status = "completed" if result.get("status") == "completed" else result.get("status", "failed")

@@ -12,16 +12,28 @@ from ..config import get_settings
 from ..observability.usage import attach_usage_payload
 
 try:
-    from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
+    from openai import (
+        APIConnectionError,
+        APITimeoutError,
+        AuthenticationError,
+        InternalServerError,
+        PermissionDeniedError,
+        RateLimitError,
+    )
 
+    # Transient failures only. The base APIError must NOT be here: it is the
+    # parent of AuthenticationError/PermissionDeniedError, which never fix
+    # themselves — retrying them just delays a misleading "service unavailable".
     OPENAI_RETRYABLE_ERRORS = (
         APIConnectionError,
         APITimeoutError,
         RateLimitError,
-        APIError,
+        InternalServerError,
     )
+    OPENAI_FATAL_ERRORS = (AuthenticationError, PermissionDeniedError)
 except ImportError:
     OPENAI_RETRYABLE_ERRORS = ()
+    OPENAI_FATAL_ERRORS = ()
 
 
 logger = logging.getLogger(__name__)
@@ -62,31 +74,23 @@ class OpenAIProvider(AIProvider):
             "experiment plan",
             case_data,
             """
+
+If the case data contains "computed_physics" with available=true, those numbers
+come from LaserClaw's deterministic physics kernel and are AUTHORITATIVE: quote
+the cavity length, waist, spot sizes, element positions and phase-matching
+angles exactly as given (with units), and reference them in the setup and steps.
+Never replace them with your own estimate. If available=false, say the geometry
+still has to be computed with the cavity_design module.
+
 Return JSON with exactly these fields:
 {
   "objective": "clear experiment objective",
+  "computed_parameters": {"cavity_length_mm": null, "waist_w0_mm": null, "phase_match_angle_deg": null},
   "setup": "equipment and optical setup description",
   "steps": ["step 1 description", "step 2 description"],
   "measurements": ["measurement 1", "measurement 2"],
   "risks": ["safety risk 1", "mitigation"],
   "next_actions": ["follow-up action 1"]
-}
-""",
-        )
-
-    async def generate_rezonator_schema(self, case_data: Dict[str, Any]) -> Dict[str, Any]:
-        return await self._generate_json(
-            "ReZonator simulation draft",
-            case_data,
-            """
-Return JSON with exactly these fields:
-{
-  "cavity_type": "linear|ring|bow-tie|custom",
-  "components": ["HR mirror", "Nd:YAG crystal", "OC mirror"],
-  "distances": {"component_to_component_mm": 50},
-  "crystal_position": "description of crystal position in cavity",
-  "parameters_to_scan": ["cavity_length", "OC_reflectivity"],
-  "simulation_notes": "notes for ReZonator simulation setup"
 }
 """,
         )
@@ -118,14 +122,21 @@ Return JSON with exactly these fields:
             "laser experiment report draft",
             case_data,
             """
+"observations" and "data_summary" are a LAB RECORD: state ONLY what the case
+data actually contains (measurements, symptoms, module results). Never invent a
+reading, temperature or spot position that was not provided. Put anything you
+infer under "hypotheses" and mark it as unverified; if no data was recorded, say
+so explicitly.
+
 Return JSON with exactly these fields:
 {
   "title": "report title",
   "background": "background and motivation for the experiment",
   "method": "experimental method and procedure",
-  "observations": "key observations during the experiment",
-  "data_summary": "summary of collected data and measurements",
-  "conclusion": "conclusions drawn from the experiment",
+  "observations": "only what the case data records; say so if nothing recorded",
+  "data_summary": "summary of the provided measurements only",
+  "hypotheses": ["unverified inference (clearly labelled)"],
+  "conclusion": "conclusions supported by the recorded data",
   "next_steps": ["recommended next step 1", "recommended next step 2"]
 }
 """,
@@ -173,6 +184,12 @@ Return JSON with this shape:
             "You are LaserClaw's laser experiment assistant. "
             "Generate practical, safety-conscious content for laser cavity experiments. "
             "Keep the response concise. "
+            "Write every human-readable value in the SAME language as the case "
+            "title/description/goal (Chinese case -> Chinese output). JSON keys stay in English. "
+            "Never invent numeric physics values (lengths, angles, spot sizes, "
+            "reflectivities): use values given in the case data, otherwise say they "
+            "must be computed or measured. "
+            "Do not copy the placeholder numbers shown in the output schema. "
             "Return only valid JSON. Do not include markdown or extra prose."
         )
 
@@ -231,6 +248,15 @@ Return JSON with this shape:
                 parsed.setdefault("model", self.model)
                 return attach_usage_payload(parsed, provider="openai", model=self.model, usage=usage_payload)
 
+            except OPENAI_FATAL_ERRORS as exc:
+                # Never retryable, and the generic "service unavailable" text
+                # would point the user at the wrong cause. Say what it is.
+                logger.error("OpenAI auth/permission failure for task=%s: %s", task_name, exc)
+                raise RuntimeError(
+                    f"API key 无效或无权限:请检查 .env 中的 API key 是否正确、账户是否有余额。"
+                    f"(原始错误:{type(exc).__name__})"
+                ) from exc
+
             except OPENAI_RETRYABLE_ERRORS as exc:
                 last_error = exc
                 logger.warning(
@@ -250,8 +276,8 @@ Return JSON with this shape:
                 raise
 
         raise RuntimeError(
-            f"OpenAI provider failed after {max_attempts} attempts for task '{task_name}': "
-            f"{type(last_error).__name__}: {last_error}"
+            f"模型服务暂时不可用(已重试 {max_attempts} 次):{type(last_error).__name__}。"
+            f"请稍后重试;若持续失败,请检查网络与 .env 配置。"
         )
 
     @staticmethod

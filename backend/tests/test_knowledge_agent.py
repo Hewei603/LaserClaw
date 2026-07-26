@@ -153,7 +153,9 @@ def test_agent_chat_persists_case_aware_messages(client):
     assert messages.status_code == 200
     payload = messages.json()
     assert [item["role"] for item in payload] == ["user", "assistant"]
-    assert "selected case context" in payload[1]["content"] or "current case context" in payload[1]["content"]
+    # The mock reply is Chinese and must carry the case title + demo marker.
+    assert "No output linear cavity" in payload[1]["content"]
+    assert "演示模式" in payload[1]["content"]
 
 
 def test_global_knowledge_upload_is_used_by_agent_chat(client):

@@ -24,26 +24,6 @@ async def test_generate_plan(client):
     assert "disclaimer" in data["content"]
 
 
-@pytest.mark.asyncio
-async def test_generate_rezonator(client):
-    """测试生成ReZonator模式"""
-    # 创建案例
-    create_response = client.post("/api/cases", json={
-        "title": "测试案例",
-        "cavity_type": "ring",
-        "goal": "测试ReZonator生成",
-        "parameters": {"波长": "800nm"}
-    })
-    case_id = create_response.json()["id"]
-
-    # 生成ReZonator模式
-    response = client.post(f"/api/cases/{case_id}/generate-rezonator")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["content_type"] == "rezonator"
-    assert "content" in data
-    assert "cavity_type" in data["content"]
-
 
 @pytest.mark.asyncio
 async def test_generate_troubleshooting(client):

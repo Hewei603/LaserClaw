@@ -6,7 +6,7 @@ from app.agent.router import (
     TOOL_CHAT,
     TOOL_PLAN,
     TOOL_REPORT,
-    TOOL_RESONATOR,
+    TOOL_CAVITY_DESIGN,
     TOOL_TROUBLESHOOTING,
     route_sync,
 )
@@ -106,25 +106,19 @@ class TestReportRoutingEnglish:
 # ---------------------------------------------------------------------------
 # generate_resonator_draft cases (Chinese)
 # ---------------------------------------------------------------------------
-class TestResonatorRoutingChinese:
-    def test_rez_01(self): assert_route("帮我生成 ReZonator 仿真输入", TOOL_RESONATOR)
-    def test_rez_02(self): assert_route("腔稳定性分析", TOOL_RESONATOR)
-    def test_rez_03(self): assert_route("腔长怎么设置", TOOL_RESONATOR)
-    def test_rez_04(self): assert_route("曲率半径参数", TOOL_RESONATOR)
-    def test_rez_05(self): assert_route("谐振腔设计方案", TOOL_RESONATOR)
-    def test_rez_06(self): assert_route("腔型设计，线形腔", TOOL_RESONATOR)
-    def test_rez_07(self): assert_route("腔模计算", TOOL_RESONATOR)
-    def test_rez_08(self): assert_route("腔参数优化", TOOL_RESONATOR)
+class TestCavityDesignRoutingChinese:
+    def test_rez_02(self): assert_route("腔稳定性分析", TOOL_CAVITY_DESIGN)
+    def test_rez_04(self): assert_route("曲率半径参数", TOOL_CAVITY_DESIGN)
+    def test_rez_06(self): assert_route("腔型设计，线形腔", TOOL_CAVITY_DESIGN)
+    def test_rez_08(self): assert_route("腔参数优化", TOOL_CAVITY_DESIGN)
 
 
 # ---------------------------------------------------------------------------
 # generate_resonator_draft cases (English)
 # ---------------------------------------------------------------------------
-class TestResonatorRoutingEnglish:
-    def test_rez_en_01(self): assert_route("Generate ReZonator simulation input", TOOL_RESONATOR)
-    def test_rez_en_02(self): assert_route("Cavity stability analysis", TOOL_RESONATOR)
-    def test_rez_en_03(self): assert_route("What cavity length should I use?", TOOL_RESONATOR)
-    def test_rez_en_04(self): assert_route("Resonator design with radius of curvature", TOOL_RESONATOR)
+class TestCavityDesignRoutingEnglish:
+    def test_rez_en_02(self): assert_route("Cavity stability analysis", TOOL_CAVITY_DESIGN)
+    def test_rez_en_04(self): assert_route("Resonator design with radius of curvature", TOOL_CAVITY_DESIGN)
 
 
 # ---------------------------------------------------------------------------
@@ -190,18 +184,6 @@ def test_routing_accuracy_summary():
         ("Summarize the experiment results", TOOL_REPORT),
         ("Generate a data summary", TOOL_REPORT),
         ("Write up the experiment record", TOOL_REPORT),
-        ("帮我生成 ReZonator 仿真输入", TOOL_RESONATOR),
-        ("腔稳定性分析", TOOL_RESONATOR),
-        ("腔长怎么设置", TOOL_RESONATOR),
-        ("曲率半径参数", TOOL_RESONATOR),
-        ("谐振腔设计方案", TOOL_RESONATOR),
-        ("腔型设计，线形腔", TOOL_RESONATOR),
-        ("腔模计算", TOOL_RESONATOR),
-        ("腔参数优化", TOOL_RESONATOR),
-        ("Generate ReZonator simulation input", TOOL_RESONATOR),
-        ("Cavity stability analysis", TOOL_RESONATOR),
-        ("What cavity length should I use?", TOOL_RESONATOR),
-        ("Resonator design with radius of curvature", TOOL_RESONATOR),
         ("激光的工作原理是什么", TOOL_CHAT),
         ("Nd:YAG 晶体的特性", TOOL_CHAT),
         ("What is stimulated emission?", TOOL_CHAT),

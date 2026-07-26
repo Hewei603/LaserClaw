@@ -1,6 +1,10 @@
 """Test configuration."""
 import os
 
+# Ignore any developer .env so the suite never picks up real API keys
+# or a different provider. Must be set before app.config is imported.
+os.environ["LASERCLAW_NO_DOTENV"] = "1"
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

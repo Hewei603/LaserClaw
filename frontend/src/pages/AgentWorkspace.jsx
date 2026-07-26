@@ -77,7 +77,13 @@ function AgentWorkspace() {
       const data = await agentApi.getSession(id);
       setSessionId(data.id);
       if (data.case_id) setCaseId(String(data.case_id));
-      setMessages(data.messages.map((item) => ({ role: item.role, text: item.content, metadata: item.metadata_json })));
+      setMessages(data.messages.map((item) => ({
+        role: item.role,
+        text: item.content,
+        routedMode: item.metadata_json?.routed_mode && item.metadata_json.routed_mode !== 'chat' ? item.metadata_json.routed_mode : null,
+        task: item.metadata_json?.task_id ? { id: item.metadata_json.task_id, status: 'completed' } : null,
+        citations: item.metadata_json?.citations || [],
+      })));
     } catch (err) {
       setError(err.message);
     }
@@ -103,10 +109,13 @@ function AgentWorkspace() {
         sessionId,
       });
       setSessionId(response.session_id);
-      const taskText = response.task
-        ? `\n\nTask #${response.task.id}: ${response.task.status}. Routed tool: ${response.routed_mode}.`
-        : '';
-      setMessages((prev) => [...prev, { role: 'assistant', text: `${response.message}${taskText}` }]);
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        text: response.message,
+        routedMode: response.routed_mode !== 'chat' ? response.routed_mode : null,
+        task: response.task ? { id: response.task.id, status: response.task.status } : null,
+        citations: response.citations || [],
+      }]);
       loadSessions(caseId ? Number(caseId) : null);
     } catch (err) {
       setError(err.message);
@@ -142,7 +151,7 @@ function AgentWorkspace() {
         <select id="agent-session" value={sessionId || ''} onChange={(event) => loadSession(event.target.value)}>
           <option value="">{t('agentPage.newSession')}</option>
           {sessions.map((item) => (
-            <option key={item.id} value={item.id}>{item.title || `Session #${item.id}`}</option>
+            <option key={item.id} value={item.id}>{item.title || `${t('agentPage.sessionFallback')}${item.id}`}</option>
           ))}
         </select>
         <div className="agent-context">
@@ -162,8 +171,23 @@ function AgentWorkspace() {
         <div className="chat-stream">
           {messages.map((item, index) => (
             <article key={`${item.role}-${index}`} className={`chat-message ${item.role}`}>
-              <span>{item.role === 'user' ? 'You' : 'LaserClaw'}</span>
+              <span>{item.role === 'user' ? t('agentPage.you') : 'LaserClaw'}</span>
               <p>{item.text}</p>
+              {(item.routedMode || item.task) && (
+                <div className="chat-meta">
+                  {item.routedMode && <span className="meta-pill">{item.routedMode}</span>}
+                  {item.task && <span className="meta-pill">Task #{item.task.id} · {item.task.status}</span>}
+                </div>
+              )}
+              {(item.citations || []).length > 0 && (
+                <div className="chat-citations">
+                  {item.citations.slice(0, 3).map((c) => (
+                    <span key={`${c.source_id}-${c.chunk_id}`} className="meta-pill" title={c.snippet}>
+                      📎 {c.title} · {c.score}
+                    </span>
+                  ))}
+                </div>
+              )}
             </article>
           ))}
         </div>

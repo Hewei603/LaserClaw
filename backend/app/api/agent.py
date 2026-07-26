@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session
 from ..agent.context import build_chat_context
 from ..agent.memory import maybe_summarize_session
 from ..agent.orchestrator import create_and_run_task
+from ..agent.planner import mode_label
 from ..auth.acl import accessible_case_ids, assert_case_edit, assert_case_view
 from ..auth.security import Principal, get_current_principal
 from ..database import get_db
-from ..models import AgentChatMessage, AgentChatSession, AgentMemoryItem, AgentSessionSummary, AgentTask, AgentToolCall, ExperimentCase
+from ..models import AgentChatMessage, AgentChatSession, AgentMemoryItem, AgentSessionSummary, AgentTask, AgentToolCall, ExperimentCase, GeneratedContent
 from ..observability.audit import record_audit
 from ..providers import get_ai_provider
 from ..schemas import (
@@ -32,9 +33,16 @@ _GENERATE_INTENT = [
     "生成", "帮我写", "帮我做", "帮我生成", "帮我制定", "帮我草拟",
     "给我写", "给我生成", "给我做", "写一个", "写一份", "制定",
     "草拟", "出一份", "出一个", "整理", "总结一下", "做一个", "做一份",
+    # Chinese - design/compute/select intent for physics + inventory tools
+    "帮我设计", "设计一个", "设计", "帮我算", "算一下", "计算", "帮我仿真", "仿真",
+    "帮我选", "帮我找", "帮我挑", "选出", "挑选", "筛选",
+    "帮我分析", "分析一下", "分析", "拟合", "analyze", "fit",
+    # selection verbs fused with their object carry intent by themselves
+    "选元件", "找元件", "挑元件", "选镜", "找镜", "选晶体", "找晶体",
     # English
     "generate", "create", "write", "draft", "make", "produce",
     "give me a", "prepare", "build",
+    "design", "compute", "calculate", "simulate",
 ]
 
 # Content type keywords — what to generate
@@ -50,10 +58,6 @@ _CONTENT_KEYWORDS = {
     "report": [
         "实验报告", "报告", "总结报告", "实验总结",
         "report", "experiment report", "lab report", "summary report",
-    ],
-    "rezonator": [
-        "rezonator", "仿真输入", "腔型草稿", "谐振腔草稿", "腔参数草稿",
-        "resonator draft", "simulation input", "cavity draft",
     ],
     "stability": [
         "稳定性", "功率稳定", "功率计读数", "ocr", "稳定性报告",
@@ -72,6 +76,27 @@ _CONTENT_KEYWORDS = {
     "module_management": [
         "模块", "添加模块", "更改模块", "删除模块", "case module",
     ],
+    "cavity_design": [
+        "谐振腔", "腔体设计", "腔设计", "腔长", "稳区", "束腰", "腔内光斑", "摆放位置", "镜距",
+        "cavity design", "resonator design", "cavity length", "waist", "stability range", "mirror spacing",
+    ],
+    "phase_match": [
+        "相位匹配", "匹配角", "倍频角", "切角", "走离", "和频角",
+        "phase match", "phase-matching", "pm angle", "walk-off", "walkoff", "cut angle",
+    ],
+    "coating_tmm": [
+        "镀膜曲线", "反射率曲线", "膜系", "阻带", "镀膜评估", "镀膜能不能用",
+        "coating curve", "reflectivity curve", "stopband", "coating analysis", "tmm",
+    ],
+    "power_curve": [
+        "功率曲线", "输出功率曲线", "阈值", "斜率效率", "泵浦功率",
+        "power curve", "slope efficiency", "threshold", "input-output", "p-p curve",
+    ],
+    "component_match": [
+        "选元件", "找元件", "挑元件", "匹配元件", "元件匹配", "库存匹配", "库存里", "现有元件",
+        "哪个镜子", "哪块镜子", "哪块晶体", "选镜子", "找镜子",
+        "component match", "match components", "which mirror", "from inventory", "in stock",
+    ],
 }
 
 
@@ -87,7 +112,9 @@ def _route_mode(message: str) -> str:
     if not has_intent:
         return "chat"
 
-    for mode in ["stability", "beam_profile", "spectrum", "components", "module_management", "rezonator", "troubleshooting", "report", "plan"]:
+    for mode in ["stability", "beam_profile", "spectrum", "components", "module_management",
+                 "cavity_design", "phase_match", "coating_tmm", "component_match", "power_curve",
+                 "troubleshooting", "report", "plan"]:
         keywords = _CONTENT_KEYWORDS[mode]
         if any(kw in text for kw in keywords):
             return mode
@@ -218,7 +245,7 @@ async def chat(
 
     if routed_mode == "chat":
         content = await get_ai_provider().generate_chat_response(context)
-        assistant_text = content.get("message") or "I reviewed the available case context and knowledge sources."
+        assistant_text = content.get("message") or "我已查看当前案例上下文与知识库,可继续提问或指定要生成的内容。"
         db.add(
             AgentChatMessage(
                 session_id=session.id,
@@ -245,8 +272,8 @@ async def chat(
 
     if case is None:
         assistant_text = (
-            "Link a case before asking LaserClaw to create a saved plan, troubleshooting guide, "
-            "report, or ReZonator draft."
+            "请先在上方选择(关联)一个实验案例,再让 LaserClaw 生成可保存的实验计划、"
+            "故障排查、报告或物理模块结果——生成的内容都会存到该案例名下。"
         )
         db.add(
             AgentChatMessage(
@@ -274,7 +301,25 @@ async def chat(
         require_citations=request.require_citations,
         extra_context=context,
     )
-    assistant_text = f"Created and completed a {routed_mode} artifact. It is saved on the linked case."
+    # The confirmation must reflect what actually happened: a module that came
+    # back needs_input/failed is NOT a completed design, and saying so in
+    # English hid both facts from the intended user.
+    label = mode_label(routed_mode)
+    module_result: dict = {}
+    if task.final_content_id:
+        generated = db.query(GeneratedContent).filter(GeneratedContent.id == task.final_content_id).first()
+        if generated and isinstance(generated.content, dict):
+            module_result = generated.content.get("result") or {}
+    module_status = module_result.get("status")
+    if module_status == "needs_input":
+        hint = module_result.get("message") or ""
+        assistant_text = (f"已创建「{label}」模块,但还缺少输入:{hint} "
+                          f"请到案例的「模块」标签页补齐后点「运行」。")
+    elif module_status == "failed":
+        hint = module_result.get("message") or "详见案例「模块」标签页的结果。"
+        assistant_text = f"「{label}」计算未成功:{hint}"
+    else:
+        assistant_text = f"已完成「{label}」并保存到关联案例(可在对应标签页查看)。"
     db.add(
         AgentChatMessage(
             session_id=session.id,
