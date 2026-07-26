@@ -22,11 +22,30 @@ function InventoryPage() {
   const [filters, setFilters] = useState({ category: '', wavelengthNm: '', functionName: '' });
   const [nameQuery, setNameQuery] = useState('');
   const [showReview, setShowReview] = useState(false);
-  const [matchForm, setMatchForm] = useState({ wavelength: '1064', functionName: 'HR', roc: '', minD: '' });
+  const [matchForm, setMatchForm] = useState({ wavelength: '1064', functionName: 'HR', roc: '', minD: '', minR: '' });
   const [matchResult, setMatchResult] = useState(null);
   const [matching, setMatching] = useState(false);
+  const [sources, setSources] = useState([]);
 
-  useEffect(() => { loadItems(); }, []);
+  useEffect(() => { loadItems(); loadSources(); }, []);
+
+  const loadSources = async () => {
+    try {
+      setSources(await inventoryApi.listSources());
+    } catch {
+      setSources([]);
+    }
+  };
+
+  const handleDeleteSource = async (sourceFile) => {
+    if (!window.confirm(t('inventoryPage.confirmClearSource'))) return;
+    try {
+      await inventoryApi.clearItems(sourceFile);
+      await Promise.all([loadItems(), loadSources()]);
+    } catch (err) {
+      setError(t('inventoryPage.deleteFailed') + err.message);
+    }
+  };
 
   const loadItems = async (override = {}, reviewFlag = showReview) => {
     setLoadingItems(true);
@@ -57,7 +76,7 @@ function InventoryPage() {
       const report = await inventoryApi.importWorkbook(file);
       setImportReport(report);
       event.target.value = '';
-      await loadItems();
+      await Promise.all([loadItems(), loadSources()]);
     } catch (err) {
       setError(t('inventoryPage.importFailed') + err.message);
     } finally {
@@ -70,9 +89,15 @@ function InventoryPage() {
     setMatching(true);
     setError(null);
     try {
+      const surface = { wavelength_nm: Number(matchForm.wavelength), function: matchForm.functionName };
+      // A reflectivity floor turns "HR" from a label into a hard判定:
+      // R=85% nominal vs min_R_pct=99.5 → below_spec, exactly as documented.
+      if (matchForm.minR.trim() && !Number.isNaN(Number(matchForm.minR))) {
+        surface.min_R_pct = Number(matchForm.minR);
+      }
       const requirement = {
         role: 'ui match',
-        surfaces: [{ wavelength_nm: Number(matchForm.wavelength), function: matchForm.functionName }],
+        surfaces: [surface],
       };
       const rawRoc = matchForm.roc.trim().toLowerCase();
       if (rawRoc) {
@@ -128,6 +153,19 @@ function InventoryPage() {
               <div className="stat-chip"><span className="stat-label">{t('inventoryPage.needsReview')}</span><span className="stat-value">{importReport.needs_review + importReport.partial}</span></div>
             </div>
           )}
+          {sources.length > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <h3>{t('inventoryPage.sourcesTitle')}</h3>
+              {sources.map((source) => (
+                <div key={source.source_file} className="source-row">
+                  <span>{source.source_file} · {source.items}</span>
+                  <button className="btn btn-danger" type="button" onClick={() => handleDeleteSource(source.source_file)}>
+                    {t('inventoryPage.deleteSource')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <form className="card" onSubmit={handleMatch}>
@@ -157,7 +195,12 @@ function InventoryPage() {
               {t('inventoryPage.reqMinD')}
               <input value={matchForm.minD} onChange={(e) => setMatchForm({ ...matchForm, minD: e.target.value })} placeholder="12.7" />
             </label>
+            <label>
+              {t('inventoryPage.reqMinR')}
+              <input value={matchForm.minR} onChange={(e) => setMatchForm({ ...matchForm, minR: e.target.value })} placeholder="99.5" title={t('inventoryPage.reqMinRHint')} />
+            </label>
           </div>
+          <p className="muted">{t('inventoryPage.reqMinRHint')}</p>
           <button className="btn btn-primary" type="submit" disabled={matching}>
             {matching ? t('inventoryPage.matching') : t('inventoryPage.matchBtn')}
           </button>

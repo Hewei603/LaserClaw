@@ -98,7 +98,7 @@ async def create_and_run_task(
             lambda: search_payload(db, goal, case_id, 5, task.id),
         )
         steps[1].status = "completed"
-        steps[1].result_summary = f"Retrieved {len(retrieval['results'])} knowledge chunks."
+        steps[1].result_summary = f"检索到 {len(retrieval['results'])} 条相关知识片段。"
 
         if mode in MODULE_MODES:
             if case is None:
@@ -123,7 +123,7 @@ async def create_and_run_task(
                 lambda: save_generated_content_payload(generated),
             )
             steps[3].status = "completed"
-            steps[3].result_summary = "Module result saved as generated content."
+            steps[3].result_summary = "模块结果已保存为生成内容。"
             task.status = "completed"
             task.final_content_id = generated.id
             record_audit(db, action="agent_task.complete", resource_type="agent_task", resource_id=str(task.id))
@@ -300,9 +300,9 @@ def _run_module_task(
         module.result_json = output
 
     steps[2].status = "completed"
-    steps[2].result_summary = module.result_json.get("summary") or module.result_json.get("message") or "Module workflow updated."
+    steps[2].result_summary = module.result_json.get("summary") or module.result_json.get("message") or "模块工作流已更新。"
     return {
-        "disclaimer": "Module output is an auditable workspace artifact. Experimental decisions still require qualified human review.",
+        "disclaimer": "模块输出为可审计的工作区制品;实验决策仍需具备资质的人员复核。",
         "agent_task_id": task.id,
         "module_id": module.id,
         "module_type": module.module_type,
@@ -316,21 +316,21 @@ def _run_module_task(
 
 def _module_needs_inputs_payload(module: CaseModule) -> dict[str, Any]:
     required = {
-        "stability": "Upload a power meter photo ZIP and provide ROI x,y,w,h, then run the stability module.",
-        "beam_profile": "Upload a BeamGage JPG/BMP/PNG export, then run the beam profile module.",
-        "spectrum": "Upload a spectrum CSV/TXT data file, then run the spectrum module.",
-        "power_curve": "Upload a two-column pump/output power CSV (or set config.data), then run the power curve module.",
+        "stability": "请上传功率计照片 ZIP 并提供 ROI(x,y,w,h),然后运行稳定性模块。",
+        "beam_profile": "请上传 BeamGage 导出的 JPG/BMP/PNG 光斑图,然后运行光斑分析模块。",
+        "spectrum": "请上传光谱数据 CSV/TXT 文件,然后运行光谱模块。",
+        "power_curve": "请上传两列(泵浦功率, 输出功率)数据文件,或在参数框 config.data 中内联数组,然后运行功率曲线模块。",
     }
     if module.files:
         return {
             "status": "ready",
-            "summary": "Module has input files. Run the module from the Case Modules tab to execute file analysis.",
+            "summary": "模块已有输入文件。请到案例的「模块」标签页点「运行」执行分析。",
             "input_files": [{"id": item.id, "filename": item.filename, "role": item.file_role} for item in module.files],
         }
     return {
         "status": "needs_input",
-        "message": required.get(module.module_type, "Add module inputs before running analysis."),
-        "summary": "Agent created the module and is waiting for user-provided experimental files or parameters.",
+        "message": required.get(module.module_type, "请先补充模块输入,再运行分析。"),
+        "summary": "Agent 已创建模块,等待你提供实验文件或参数。",
     }
 
 

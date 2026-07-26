@@ -12,16 +12,28 @@ from ..config import get_settings
 from ..observability.usage import attach_usage_payload
 
 try:
-    from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
+    from openai import (
+        APIConnectionError,
+        APITimeoutError,
+        AuthenticationError,
+        InternalServerError,
+        PermissionDeniedError,
+        RateLimitError,
+    )
 
+    # Transient failures only. The base APIError must NOT be here: it is the
+    # parent of AuthenticationError/PermissionDeniedError, which never fix
+    # themselves — retrying them just delays a misleading "service unavailable".
     OPENAI_RETRYABLE_ERRORS = (
         APIConnectionError,
         APITimeoutError,
         RateLimitError,
-        APIError,
+        InternalServerError,
     )
+    OPENAI_FATAL_ERRORS = (AuthenticationError, PermissionDeniedError)
 except ImportError:
     OPENAI_RETRYABLE_ERRORS = ()
+    OPENAI_FATAL_ERRORS = ()
 
 
 logger = logging.getLogger(__name__)
@@ -236,6 +248,15 @@ Return JSON with this shape:
                 parsed.setdefault("model", self.model)
                 return attach_usage_payload(parsed, provider="openai", model=self.model, usage=usage_payload)
 
+            except OPENAI_FATAL_ERRORS as exc:
+                # Never retryable, and the generic "service unavailable" text
+                # would point the user at the wrong cause. Say what it is.
+                logger.error("OpenAI auth/permission failure for task=%s: %s", task_name, exc)
+                raise RuntimeError(
+                    f"API key 无效或无权限:请检查 .env 中的 API key 是否正确、账户是否有余额。"
+                    f"(原始错误:{type(exc).__name__})"
+                ) from exc
+
             except OPENAI_RETRYABLE_ERRORS as exc:
                 last_error = exc
                 logger.warning(
@@ -255,8 +276,8 @@ Return JSON with this shape:
                 raise
 
         raise RuntimeError(
-            f"OpenAI provider failed after {max_attempts} attempts for task '{task_name}': "
-            f"{type(last_error).__name__}: {last_error}"
+            f"模型服务暂时不可用(已重试 {max_attempts} 次):{type(last_error).__name__}。"
+            f"请稍后重试;若持续失败,请检查网络与 .env 配置。"
         )
 
     @staticmethod

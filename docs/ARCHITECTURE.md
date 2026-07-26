@@ -99,7 +99,7 @@ oracle(GPL,已 gitignore,绝不拷贝)。
 | `physics/coating_tool.py` | 镀膜评估统一入口 `evaluate_coating`:精确膜系 / 厂商曲线 / 标称原型三模式 | 同上 + 对抗回归(`tests/test_physics_adversarial_fixes.py`) |
 | `physics/beam.py` | ABCD 元件矩阵、高斯 q 传播、往返稳定性、自洽本征模、各面光斑(= ReZonator 级内核) | 对称腔/平凹腔/共焦极限闭式解(`tests/test_physics_beam.py`) |
 | `physics/nonlinear.py` | 单轴+双轴主平面相位匹配(所有偏振配对)、走离 | 文献角度:BBO SHG-I 22.8°、THG 31.3°、LBO 11.4°、BiBO 等(`tests/test_physics_nonlinear.py`) |
-| `physics/toolkit.py` | **工作流适配层**(dict→dict):`run_cavity_design`(定长分析/腔长扫描→稳区→推荐几何+元件摆位)、`run_phase_match`、`run_coating_tmm`;REST 与 Agent 共用 | `tests/test_physics_modules.py` |
+| `physics/toolkit.py` | **工作流适配层**(dict→dict):`run_cavity_design`(定长分析/腔长扫描→稳区→推荐几何+元件摆位,未给目标束腰时按**实测热透镜裕度**排序而非 \|m\| 代理;腔长留空默认扫 30–800mm)、`run_phase_match`(接受案例参数别名 `nonlinear_crystal`/`wavelength_nm`/`shg_pm_type`,增益晶体字典不会被误当晶体名)、`run_coating_tmm`;所有 needs_input/failed 提示为中文;REST 与 Agent 共用 | `tests/test_physics_modules.py`、`tests/test_grad_student_ux_fixes.py` |
 | `physics/design.py` | **腔型设计搜索**:用户没给镜子时,遍历候选曲率×腔长,两级排序输出可搭建几何——先按束腰匹配粗筛,再对入围者**实测热透镜裕度**(在增益介质处插薄透镜、扫光焦度直至失稳),`score = 0.55×模式惩罚 + 0.45×热稳健性惩罚`;候选曲率优先取自实验室库存 | `tests/test_physics_grounded_plan.py` |
 | `physics/case_context.py` | **案例→物理事实桥接**:实验计划生成前先跑内核(已知几何→分析;未知几何→设计搜索;非线性→相位匹配;标称镀膜→阻带核查),结果作为权威数值注入提示词 | 同上 |
 | `physics/laser_metrics.py` | **测量分析**:功率曲线阈值+斜率效率拟合(自动线性区检测)、Findlay-Clay / Caird 跨曲线腔损耗分析 | 合成数据还原真值(`tests/test_power_curve.py`) |
@@ -153,7 +153,8 @@ oracle(GPL,已 gitignore,绝不拷贝)。
       步骤3 compute_cavity_design                                    (record_tool_call 留痕)
              └► physics/toolkit.py::run_cavity_design
                  └► physics/beam.py: 逐腔长 ABCD 往返矩阵 → 稳定性 |m|<1
-                    → 自洽本征 q → 束腰/各面光斑 → 稳区窗口 → 按目标束腰推荐 L
+                    → 自洽本征 q → 束腰/各面光斑 → 稳区窗口
+                    → 推荐 L(给了目标束腰按束腰匹配;否则按实测热透镜裕度最大)
       步骤4 save_generated_content → GeneratedContent(带 citations) → 入 RAG 索引
   ▼ 全程 AgentTask/AgentStep/AgentToolCall/RetrievalRun 落库,可回放审计
 ```

@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Link, Route, Routes } from 'react-router-dom';
+import apiClient from './api/client';
 import AgentWorkspace from './pages/AgentWorkspace';
 import CaseDetail from './pages/CaseDetail';
 import CaseForm from './pages/CaseForm';
@@ -41,12 +42,41 @@ function FooterText() {
   return <p>{t('common.footer')}</p>;
 }
 
+function ProviderBanner() {
+  const { t } = useLanguage();
+  const [provider, setProvider] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.get('/health')
+      .then((res) => { if (!cancelled) setProvider(res.data?.provider || null); })
+      .catch(() => {});      // unreachable backend already yields page-level errors
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!provider) return null;
+  // Mock output is indistinguishable from a real model's by tone — the user
+  // must always be able to see which one produced what they are reading.
+  if (provider.error) {
+    return <div className="error" style={{ margin: '0.5rem 1rem' }}>{t('banner.providerError')}{provider.error}</div>;
+  }
+  if (provider.is_mock) {
+    return (
+      <div className="disclaimer" style={{ margin: '0.5rem 1rem' }}>
+        ⚠ {t('banner.demo')}
+      </div>
+    );
+  }
+  return null;
+}
+
 function App() {
   return (
     <LanguageProvider>
       <Router>
         <div className="app">
           <NavBar />
+          <ProviderBanner />
           <main className="main-content">
             <Routes>
               <Route path="/" element={<Home />} />

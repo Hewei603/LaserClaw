@@ -81,5 +81,35 @@ def get_ai_provider() -> AIProvider:
             return MockProvider()
 
     if provider_name != "mock":
-        logger.warning("Unknown AI_PROVIDER=%s; falling back to MockProvider", provider_name)
+        # A typo like "deepseak" must not silently demote the app to demo data:
+        # strict mode treats it exactly like a missing key.
+        message = f"Unknown AI_PROVIDER={provider_name}"
+        if settings.strict_provider:
+            raise RuntimeError(message + " (check the spelling in .env)")
+        logger.warning("%s; falling back to MockProvider", message)
     return MockProvider()
+
+
+def provider_status() -> dict:
+    """Which provider is actually in effect — for /health and the UI banner.
+
+    The configured name and the effective provider can differ (missing key,
+    SDK import failure), and that difference is exactly what the user needs
+    to see: mock output is indistinguishable from real output by tone alone.
+    """
+    settings = get_settings()
+    try:
+        provider = get_ai_provider()
+    except Exception as exc:  # strict mode surfaces the misconfiguration
+        return {
+            "configured_provider": settings.ai_provider,
+            "effective_provider": None,
+            "is_mock": False,
+            "error": str(exc),
+        }
+    is_mock = isinstance(provider, MockProvider)
+    return {
+        "configured_provider": settings.ai_provider,
+        "effective_provider": "mock" if is_mock else settings.ai_provider.lower(),
+        "is_mock": is_mock,
+    }

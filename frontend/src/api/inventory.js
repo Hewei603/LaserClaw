@@ -24,4 +24,15 @@ export const inventoryApi = {
     const response = await apiClient.post('/api/inventory/match', requirement);
     return response.data;
   },
+
+  listSources: async () => {
+    const response = await apiClient.get('/api/inventory/sources');
+    return response.data;
+  },
+
+  clearItems: async (sourceFile) => {
+    const params = sourceFile ? { source_file: sourceFile } : {};
+    const response = await apiClient.delete('/api/inventory/items', { params });
+    return response.data;
+  },
 };

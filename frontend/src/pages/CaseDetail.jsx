@@ -4,7 +4,7 @@ import { agentApi } from '../api/agent';
 import { API_BASE_URL } from '../api/client';
 import { casesApi } from '../api/cases';
 import { knowledgeApi } from '../api/knowledge';
-import { ModuleResult } from '../components/ModuleResults';
+import { ModuleResult, PhysicsFactsBlock } from '../components/ModuleResults';
 import { useLanguage } from '../LanguageContext';
 
 function CaseDetail() {
@@ -386,6 +386,75 @@ function CaseDetail() {
     </div>
   );
 
+  // Keys handled specially (or internal) — everything else renders generically,
+  // so no provider's output field silently disappears from the card again.
+  const HANDLED_KEYS = new Set([
+    'title', 'summary', 'disclaimer', 'notice', 'citations', 'computed_physics',
+    'retrieval', 'confidence', 'usage', 'model', 'model_provider', 'goal',
+  ]);
+
+  const sectionTitle = (key) => {
+    const translated = t(`caseDetail.genSections.${key}`);
+    return translated !== `caseDetail.genSections.${key}` ? translated : key.replace(/_/g, ' ');
+  };
+
+  const entryLine = (entry) => {
+    if (typeof entry !== 'object' || entry === null) return String(entry);
+    return entry.title || entry.step_title || entry.description || entry.step || entry.name
+      || entry.symptom || entry.check || entry.action || JSON.stringify(entry);
+  };
+
+  const renderValue = (key, value) => {
+    if (value == null || value === '') return null;
+    if (Array.isArray(value)) {
+      if (value.length === 0) return null;
+      return (
+        <div key={key} className="generated-section">
+          <h3>{sectionTitle(key)}</h3>
+          <ol>
+            {value.map((entry, i) => (
+              <li key={i}>{entryLine(entry)}
+                {typeof entry === 'object' && entry !== null && (entry.detail || (entry.description && entry.title)) && (
+                  <p className="muted">{entry.detail || entry.description}</p>
+                )}
+                {typeof entry === 'object' && entry !== null && Array.isArray(entry.possible_causes) && (
+                  <ul>
+                    {entry.possible_causes.map((cause, j) => <li key={j} className="muted">{cause}</li>)}
+                  </ul>
+                )}
+                {typeof entry === 'object' && entry !== null && Array.isArray(entry.solutions || entry.recommended_actions) && (
+                  <ul>
+                    {(entry.solutions || entry.recommended_actions).map((s, j) => <li key={j}>{s}</li>)}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      );
+    }
+    if (typeof value === 'object') {
+      return (
+        <div key={key} className="generated-section">
+          <h3>{sectionTitle(key)}</h3>
+          <table className="mini-table">
+            <tbody>
+              {Object.entries(value).map(([k, v]) => (
+                <tr key={k}><td>{k}</td><td className="num">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+    return (
+      <div key={key} className="generated-section">
+        <h3>{sectionTitle(key)}</h3>
+        <p>{String(value)}</p>
+      </div>
+    );
+  };
+
   const renderGenerated = (type) => {
     const item = latest(type);
     if (!item) {
@@ -395,32 +464,28 @@ function CaseDetail() {
           <button className="btn btn-primary" disabled={generating[type]} onClick={() => handleGenerate(type)}>
             {generating[type] ? t('caseDetail.generating') : t('caseDetail.generate')}
           </button>
+          {generating[type] && <p className="muted">{t('caseDetail.generatingHint')}</p>}
         </div>
       );
     }
     const c = item.content || {};
-    const listSections = [
-      ['steps', c.steps], ['sections', c.sections], ['checks', c.checks],
-      ['recommendations', c.recommendations], ['actions', c.actions],
-    ].filter(([, v]) => Array.isArray(v) && v.length > 0);
     return (
       <div className="card">
-        <h2 className="card-title">{c.title || c.summary || item.content_type}</h2>
-        {c.summary && c.title && <p className="result-summary">{c.summary}</p>}
-        {listSections.map(([name, arr]) => (
-          <div key={name} className="generated-section">
-            <h3>{name}</h3>
-            <ol>
-              {arr.map((entry, i) => (
-                <li key={i}>{typeof entry === 'string' ? entry : (entry.title || entry.step || entry.name || JSON.stringify(entry))}
-                  {typeof entry === 'object' && (entry.detail || entry.description) && (
-                    <p className="muted">{entry.detail || entry.description}</p>
-                  )}
-                </li>
-              ))}
-            </ol>
+        <div className="generated-card-title">
+          <h2 className="card-title">{c.title || c.summary || item.content_type}</h2>
+          <div className="action-row">
+            {item.model && <span className="meta-pill">{t('caseDetail.modelLabel')}: {item.model}</span>}
+            {item.latency_ms != null && <span className="meta-pill">{t('caseDetail.latencyLabel')}: {(item.latency_ms / 1000).toFixed(1)}s</span>}
+            <button className="btn btn-secondary" disabled={generating[type]} onClick={() => handleGenerate(type)}>
+              {generating[type] ? t('caseDetail.generating') : t('caseDetail.generate')}
+            </button>
           </div>
-        ))}
+        </div>
+        {generating[type] && <p className="muted">{t('caseDetail.generatingHint')}</p>}
+        {c.notice && <div className="disclaimer">{c.notice}</div>}
+        {type === 'plan' && <PhysicsFactsBlock physics={c.computed_physics} />}
+        {c.summary && c.title && <p className="result-summary">{c.summary}</p>}
+        {Object.entries(c).filter(([key]) => !HANDLED_KEYS.has(key)).map(([key, value]) => renderValue(key, value))}
         {c.disclaimer && <div className="disclaimer">{c.disclaimer}</div>}
         {renderCitations(c.citations)}
         <details>

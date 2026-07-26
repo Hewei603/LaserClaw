@@ -120,15 +120,28 @@ def run_cavity_design(config: dict[str, Any]) -> dict[str, Any]:
       and ``target_waist_mm`` (scan recommendation criterion).
     """
     wavelength_nm = float(config.get("wavelength_nm", 1064.0))
+    # Nothing geometric at all means the user has not started yet — tell them
+    # exactly which fields to fill instead of failing on an implicit default.
+    if all(config.get(k) is None for k in ("R1_mm", "R2_mm", "L_mm", "L_scan_mm")):
+        return {"status": "needs_input",
+                "message": "请先提供腔镜曲率:在案例的物理参数里填写 R1_mm / R2_mm"
+                           "(单位 mm,平镜填 flat),腔长留空时会自动扫描 30–800 mm。"}
     r1 = _roc(config.get("R1_mm"))
     r2 = _roc(config.get("R2_mm"))
     if r1 is None or r2 is None:
         return {"status": "needs_input",
-                "message": "Provide R1_mm and R2_mm (radius in mm, or 'flat')."}
+                "message": "腔镜曲率无法解析:R1_mm / R2_mm 请填数字(单位 mm)或 flat(平镜)。"}
     crystal = config.get("crystal") or None
+    if crystal is not None and not isinstance(crystal, dict):
+        # A case's free-form entry can put a string here (e.g. "lbo"). A string
+        # crystal belongs to the phase-match tool; here it must be a slab spec.
+        return {"status": "needs_input",
+                "message": "crystal 参数需为字典 {\"n\": 折射率, \"thickness_mm\": 厚度, "
+                           "\"position_mm\": 距M1位置}。如果你填的是倍频晶体名(如 lbo),"
+                           "请改用相位匹配模块的 crystal 字段。"}
     if crystal and "n" not in crystal:
         return {"status": "needs_input",
-                "message": "crystal config needs 'n' (refractive index) and 'thickness_mm'."}
+                "message": "crystal 字典缺少 'n'(折射率)或 'thickness_mm'(厚度 mm)。"}
 
     base = {
         "status": "completed",
@@ -140,11 +153,11 @@ def run_cavity_design(config: dict[str, Any]) -> dict[str, Any]:
             "crystal": crystal,
         },
         "assumptions": [
-            "ideal aligned linear cavity, paraxial fundamental mode",
-            "mirrors at normal incidence (no astigmatism)",
-            "crystal modeled as a plane-parallel slab (no thermal lens unless configured)",
+            "理想对准的线性腔,近轴基模",
+            "腔镜正入射(不含像散)",
+            "晶体按平行平板建模(未配置热透镜时不含热透镜)",
         ],
-        "disclaimer": "Deterministic ABCD/Gaussian computation. Experimental verification required before high-power operation.",
+        "disclaimer": "确定性 ABCD/高斯光束计算。高功率运行前需实验验证。",
     }
 
     if config.get("L_mm") is not None:
@@ -158,15 +171,15 @@ def run_cavity_design(config: dict[str, Any]) -> dict[str, Any]:
         base["summary"] = _summary_line(analysis, wavelength_nm)
         return base
 
-    scan = config.get("L_scan_mm")
-    if not scan:
-        return {"status": "needs_input",
-                "message": "Provide L_mm (analyze one length) or L_scan_mm {start, stop, step} (design scan)."}
+    # Mirrors given but no length: scan the standard range instead of refusing,
+    # matching the plan path's default (case_context) and the guide's promise
+    # that module parameters may be left empty.
+    scan = config.get("L_scan_mm") or {"start": 30.0, "stop": 800.0, "step": 5.0}
 
     start, stop = float(scan["start"]), float(scan["stop"])
     step = float(scan.get("step", max((stop - start) / 200.0, 0.1)))
     if not (stop > start and step > 0):
-        return {"status": "failed", "message": "L_scan_mm requires stop > start and step > 0."}
+        return {"status": "failed", "message": "L_scan_mm 需满足 stop > start 且 step > 0。"}
 
     target = config.get("target_waist_mm")
     target = float(target) if target is not None else None
@@ -184,13 +197,34 @@ def run_cavity_design(config: dict[str, Any]) -> dict[str, Any]:
     windows = _stable_windows(points)
     recommended = None
     if stable_pts:
+        # Local import: design.py imports helpers from this module.
+        from .design import thermal_lens_tolerance
+
+        def _tol(p: dict) -> float:
+            try:
+                return thermal_lens_tolerance(p["length_mm"], r1, r2, crystal)
+            except Exception:  # noqa: BLE001 - a bad geometry means zero margin
+                return 0.0
+
         if target is not None:
             recommended = min(stable_pts, key=lambda p: abs(p["waist_w0_mm"] - target))
-            criterion = f"waist closest to target {target} mm"
+            tol = _tol(recommended)
+            criterion = f"束腰最接近目标 {target} mm"
         else:
-            recommended = min(stable_pts, key=lambda p: abs(p["stability_m"]))
-            criterion = "maximum stability margin (|m| smallest)"
-        base["recommended"] = {"criterion": criterion, **recommended}
+            # No target waist: rank by MEASURED thermal-lens margin, never the
+            # |m| proxy — small |m| also describes the near-concentric branch,
+            # which dies under a routine thermal lens (see design.py).
+            sampled = stable_pts[:: max(1, len(stable_pts) // 40)]
+            tols = [(_tol(p), p) for p in sampled]
+            tol, recommended = max(tols, key=lambda tp: (tp[0], -abs(tp[1]["stability_m"])))
+            criterion = ("实测热透镜裕度最大(在增益介质处插入薄透镜并扫描光焦度直至失稳;"
+                         "不使用 |m| 代理判据)")
+        base["recommended"] = {
+            "criterion": criterion,
+            **recommended,
+            "thermal_lens_tolerance_dioptre": tol,
+            "thermal_lens_tolerance_min_f_mm": None if tol <= 0 else round(1000.0 / tol, 1),
+        }
         base["placement"] = _placement(recommended["length_mm"], crystal)
 
     base["scan"] = {
@@ -202,9 +236,11 @@ def run_cavity_design(config: dict[str, Any]) -> dict[str, Any]:
         "points": points[:: max(1, len(points) // 60)],
     }
     base["summary"] = (
-        f"Scanned L={start}-{stop} mm: {len(windows)} stable window(s) {windows}; "
-        + (f"recommended L={recommended['length_mm']} mm (w0={recommended.get('waist_w0_mm')} mm)."
-           if recommended else "no stable length found — change mirror ROCs.")
+        f"扫描腔长 L={start}–{stop} mm:{len(windows)} 个稳定区间 {windows};"
+        + (f"推荐 L={recommended['length_mm']} mm(w0={recommended.get('waist_w0_mm')} mm,"
+           f"可承受热透镜 {base['recommended']['thermal_lens_tolerance_dioptre']} D)。"
+           if recommended else
+           "在此范围内没有稳定腔长——请更换腔镜曲率(至少一面用曲面镜)或扩大扫描范围。")
     )
     if not stable_pts:
         base["status"] = "completed"
@@ -223,11 +259,12 @@ def _placement(l_mm: float, crystal: dict | None) -> list[dict[str, Any]]:
 
 def _summary_line(analysis: dict, wavelength_nm: float) -> str:
     if not analysis.get("stable"):
-        return f"Cavity UNSTABLE at L={analysis['length_mm']} mm (m={analysis.get('stability_m')})."
+        return (f"该腔在 L={analysis['length_mm']} mm 不稳定(m={analysis.get('stability_m')}),"
+                "无法起振——请调整腔长或腔镜曲率。")
     return (
-        f"Stable at L={analysis['length_mm']} mm (m={analysis['stability_m']}): "
-        f"w0={analysis.get('waist_w0_mm')} mm, w(M1)={analysis.get('w_on_mirror1_mm')} mm, "
-        f"w(M2)={analysis.get('w_on_mirror2_mm')} mm at {wavelength_nm} nm."
+        f"L={analysis['length_mm']} mm 稳定(m={analysis['stability_m']}):"
+        f"w0={analysis.get('waist_w0_mm')} mm,镜面光斑 w(M1)={analysis.get('w_on_mirror1_mm')} mm、"
+        f"w(M2)={analysis.get('w_on_mirror2_mm')} mm(@{wavelength_nm} nm)。"
     )
 
 
@@ -255,16 +292,28 @@ def run_phase_match(config: dict[str, Any]) -> dict[str, Any]:
     ``lambda2_nm`` (SFG), ``pm_type`` ('I'|'II', default 'I'), optional
     ``planes`` for biaxial (default all three principal planes).
     """
-    crystal = str(config.get("crystal", "")).strip().lower()
+    # Accept the case-parameter names as aliases: a case describes its
+    # nonlinear stage as nonlinear_crystal / wavelength_nm / shg_pm_type, and
+    # its `crystal` key is the GAIN slab dict — which must not be mistaken for
+    # the nonlinear crystal name here.
+    raw_crystal = config.get("crystal")
+    if not isinstance(raw_crystal, str) or not raw_crystal.strip():
+        raw_crystal = config.get("nonlinear_crystal") or config.get("shg_crystal") or ""
+    crystal = str(raw_crystal).strip().lower()
     if not crystal:
-        return {"status": "needs_input", "message": "Provide crystal (bbo, lbo, ktp, bibo)."}
+        return {"status": "needs_input",
+                "message": "请提供倍频晶体名 crystal(可选:bbo、lbo、ktp、bibo),"
+                           "或在案例物理参数里填写「倍频晶体」。"}
+    lambda1_raw = config.get("lambda1_nm", config.get("wavelength_nm"))
     try:
-        lambda1 = float(config["lambda1_nm"])
-    except (KeyError, TypeError, ValueError):
-        return {"status": "needs_input", "message": "Provide lambda1_nm (fundamental wavelength in nm)."}
+        lambda1 = float(lambda1_raw)
+    except (TypeError, ValueError):
+        return {"status": "needs_input",
+                "message": "请提供基频波长 lambda1_nm(单位 nm,如 1064),"
+                           "或在案例物理参数里填写「激光波长」。"}
     lambda2 = config.get("lambda2_nm")
     lambda2 = float(lambda2) if lambda2 is not None else None
-    pm_type = str(config.get("pm_type", "I")).upper()
+    pm_type = str(config.get("pm_type") or config.get("shg_pm_type") or "I").upper()
 
     solutions = []
     try:
@@ -276,9 +325,11 @@ def run_phase_match(config: dict[str, Any]) -> dict[str, Any]:
             for plane in planes:
                 solutions.append(NL.phase_match_biaxial_plane(crystal, plane, lambda1, lambda2, pm_type=pm_type))
     except KeyError as exc:
-        return {"status": "failed", "message": str(exc)}
+        return {"status": "failed",
+                "message": f"不支持的晶体或配置:{exc}。当前支持 bbo、lbo、ktp、bibo。"}
     except ValueError as exc:
-        return {"status": "failed", "message": str(exc)}
+        return {"status": "failed",
+                "message": f"相位匹配求解失败:{exc}。请检查波长与匹配类型(I/II)。"}
 
     found = []
     for pm in solutions:
@@ -305,13 +356,14 @@ def run_phase_match(config: dict[str, Any]) -> dict[str, Any]:
         "solutions": found,
         "matched": len(matched),
         "summary": (
-            f"{len(matched)} phase-matching solution(s) for {crystal.upper()} type {pm_type} "
-            f"{'SHG' if lambda2 is None else 'SFG'} at {lambda1} nm."
+            f"{crystal.upper()} type-{pm_type} {'倍频(SHG)' if lambda2 is None else '和频(SFG)'}"
+            f" @ {lambda1} nm:共 {len(matched)} 个相位匹配解。"
             if matched else
-            f"No angle phase-matching solution found for {crystal.upper()} type {pm_type} in the searched planes."
+            f"{crystal.upper()} type-{pm_type} 在所检索主平面内没有角度相位匹配解——"
+            "请尝试另一匹配类型或更换晶体。"
         ),
         "disclaimer": (
-            "Angles from bundled Sellmeier sets; biaxial results use the principal-plane "
-            "approximation (confidence 'medium'). Verify the cut with the vendor before ordering."
+            "切角由内置 Sellmeier 色散数据计算;双轴晶体采用主平面近似(置信度「中」)。"
+            "订购晶体前务必与厂商核实切角。"
         ),
     }

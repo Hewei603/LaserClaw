@@ -27,6 +27,7 @@ build/
 
 # Database
 *.db
+*.db-journal
 *.sqlite
 
 # Uploads

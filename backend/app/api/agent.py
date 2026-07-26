@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session
 from ..agent.context import build_chat_context
 from ..agent.memory import maybe_summarize_session
 from ..agent.orchestrator import create_and_run_task
+from ..agent.planner import mode_label
 from ..auth.acl import accessible_case_ids, assert_case_edit, assert_case_view
 from ..auth.security import Principal, get_current_principal
 from ..database import get_db
-from ..models import AgentChatMessage, AgentChatSession, AgentMemoryItem, AgentSessionSummary, AgentTask, AgentToolCall, ExperimentCase
+from ..models import AgentChatMessage, AgentChatSession, AgentMemoryItem, AgentSessionSummary, AgentTask, AgentToolCall, ExperimentCase, GeneratedContent
 from ..observability.audit import record_audit
 from ..providers import get_ai_provider
 from ..schemas import (
@@ -244,7 +245,7 @@ async def chat(
 
     if routed_mode == "chat":
         content = await get_ai_provider().generate_chat_response(context)
-        assistant_text = content.get("message") or "I reviewed the available case context and knowledge sources."
+        assistant_text = content.get("message") or "我已查看当前案例上下文与知识库,可继续提问或指定要生成的内容。"
         db.add(
             AgentChatMessage(
                 session_id=session.id,
@@ -271,8 +272,8 @@ async def chat(
 
     if case is None:
         assistant_text = (
-            "Link a case before asking LaserClaw to create a saved plan, troubleshooting guide, "
-            "report, or physics module result."
+            "请先在上方选择(关联)一个实验案例,再让 LaserClaw 生成可保存的实验计划、"
+            "故障排查、报告或物理模块结果——生成的内容都会存到该案例名下。"
         )
         db.add(
             AgentChatMessage(
@@ -300,7 +301,25 @@ async def chat(
         require_citations=request.require_citations,
         extra_context=context,
     )
-    assistant_text = f"Created and completed a {routed_mode} artifact. It is saved on the linked case."
+    # The confirmation must reflect what actually happened: a module that came
+    # back needs_input/failed is NOT a completed design, and saying so in
+    # English hid both facts from the intended user.
+    label = mode_label(routed_mode)
+    module_result: dict = {}
+    if task.final_content_id:
+        generated = db.query(GeneratedContent).filter(GeneratedContent.id == task.final_content_id).first()
+        if generated and isinstance(generated.content, dict):
+            module_result = generated.content.get("result") or {}
+    module_status = module_result.get("status")
+    if module_status == "needs_input":
+        hint = module_result.get("message") or ""
+        assistant_text = (f"已创建「{label}」模块,但还缺少输入:{hint} "
+                          f"请到案例的「模块」标签页补齐后点「运行」。")
+    elif module_status == "failed":
+        hint = module_result.get("message") or "详见案例「模块」标签页的结果。"
+        assistant_text = f"「{label}」计算未成功:{hint}"
+    else:
+        assistant_text = f"已完成「{label}」并保存到关联案例(可在对应标签页查看)。"
     db.add(
         AgentChatMessage(
             session_id=session.id,
