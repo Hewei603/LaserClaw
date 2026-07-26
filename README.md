@@ -22,6 +22,8 @@ LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows*
 - **Global knowledge base** for PDFs, TXT, Markdown, CSV, JSON, TSV, and log files.
 - **Knowledge governance** with source status, version, owner, reviewer, review time, and reindexing.
 - **Tool-calling Agent workflow** for chat, experiment plans, troubleshooting, reports, and deterministic physics/measurement modules.
+- **Deterministic physics kernel** (pure numpy): ABCD/Gaussian cavity analysis and design search with a measured thermal-lens margin, thin-film TMM coating evaluation, uniaxial/biaxial phase matching, and power-curve threshold/slope fits with Findlay-Clay and Caird cavity-loss analysis. Experiment plans are generated **around these computed numbers**, not around numbers the model invented.
+- **Structured component inventory**: import a lab component workbook (.xlsx), filter by wavelength/function at the coating-spec level, and evaluate candidates parameter by parameter against a requirement spec (usable / must-measure / rejected, with a dominance frontier). Cavity design searches are constrained to mirrors the lab actually owns.
 - **Structured AI artifacts** saved as versioned generated content.
 - **Prompt/workflow versioning** for reproducible AI runs.
 - **Case bundle export** with manifest, attachments, generated content, and knowledge metadata.
@@ -41,7 +43,10 @@ React + Vite frontend
       -> SQLite locally or PostgreSQL/pgvector in Docker
       -> File uploads and global knowledge documents
       -> RAG ingestion, chunking, embeddings, retrieval, citations
-      -> OpenAI / Anthropic / Mock provider
+      -> Deterministic physics kernel (ABCD/Gaussian cavity, thin-film TMM,
+         phase matching, power-curve fits) - pure numpy, no LLM
+      -> Structured component inventory (workbook parsing + parameter-level evaluator)
+      -> OpenAI-compatible / Anthropic / Mock provider
       -> Audit logs, usage tracking, Agent traces, generated artifacts
 ```
 
@@ -100,43 +105,67 @@ Operational setup and acceptance checks are documented in [docs/RAG_OPERATIONS.m
 
 ## Current Evaluation Evidence
 
-The public benchmark uses synthetic documents so the repository can be tested without private lab data. These documents are not real laboratory policies, equipment data, or safety training material.
+Every number below is reproducible from this repository with the command next to
+it, on the **default local configuration** (`EMBEDDING_PROVIDER=local`,
+`RETRIEVAL_BACKEND=sql_json`, `AI_PROVIDER=mock`). Measured 2026-07-26. Each
+command writes a JSON report into `docs/benchmarks/`, which is **gitignored** —
+those reports can index private lab documents, so regenerate them locally rather
+than trusting a committed copy.
 
-| Item | Value |
-|---|---|
-| Provider used for latest local benchmark | OpenAIProvider |
-| Configured model | `gpt-5` via OpenRouter during that run |
-| RAG retrieval queries | 50 |
-| Tool routing instructions | 80 |
-| Structured artifact generations | 20 |
-| End-to-end Agent tasks | 10 |
-| Backend tests | 161 passed, 2 skipped |
-| API auth dependency audit | 70 `/api/*` routes checked, 0 findings |
-| Frontend lint/build | Passed |
+The retrieval corpus is **synthetic** — these are not real laboratory policies,
+equipment data, or safety training material — and it is small (3 sources, 5
+chunks, 10 labelled queries). The retrieval figures therefore say the pipeline
+works end to end; they are **not** a claim about production-scale accuracy.
+
+| Check | Result | Reproduce with |
+|---|---|---|
+| Backend test suite | 292 passed, 2 skipped | `cd backend && py -m pytest -q` |
+| Physics kernel vs analytic/literature | included above (TMM cross-checked against the independent `tmm` package to machine precision) | `py -m pytest tests/test_physics_*.py -q` |
+| Intent-routing cases | 57 passed | `py -m pytest tests/test_router.py -q` |
+| RAG dataset assertions | 8 passed (37-query dataset) | `py -m pytest tests/eval_rag_dataset.py -q` |
+| Agent trace completeness | 7 passed | `py -m pytest tests/eval_agent_trace.py -q` |
+| API auth dependency audit | 74 `/api/*` routes checked, 0 findings | `py scripts/audit_endpoint_acl.py` |
+| Frontend lint/build | Passed | `cd frontend && npm run lint && npm run build` |
+
+Retrieval quality and latency on the synthetic corpus
+(report: `docs/benchmarks/resume_metrics_*.json`):
 
 | Metric | Result |
 |---|---:|
-| RAG Top-1 hit rate | 95.45% |
-| RAG Top-3 hit rate | 97.73% |
-| RAG MRR | 0.9678 |
-| Citation correctness | 82.00% |
-| Tool routing accuracy | 80.00% |
-| Schema pass rate | 100.00% |
-| End-to-end task success rate | 100.00% |
-| Trace completeness | 100.00% |
+| Recall@1 | 90.00% |
+| Recall@3 | 100.00% |
+| Recall@5 | 100.00% |
+| MRR | 0.95 |
+| Query latency p50 / p95 | 12.7 ms / 14.4 ms |
+| Indexing throughput | 103.9 chunks/s |
 
-Additional v1.0 benchmark scripts are available:
+Reproduce with `py scripts/benchmark_resume_metrics.py --repeats 3 --skip-llm`
+(10 labelled queries x 3 repeats = 30 executions, top_k=5).
+
+Structured generation shape and latency, MockProvider
+(report: `docs/benchmarks/latest_generation_latency.json`):
+
+| Mode | Runs | Schema pass rate | p50 latency |
+|---|---:|---:|---:|
+| plan | 3 | 100% | 658 ms |
+| troubleshooting | 3 | 100% | 47 ms |
+| report | 3 | 100% | 46 ms |
+
+Reproduce with `py scripts/benchmark_generation_latency.py --repeats 3`.
+Latency here is the deterministic template path; with a real provider it is
+dominated by the model (a `gpt-5` plan generation takes 60-120 s).
+
+Other benchmark scripts:
 
 - `backend/scripts/benchmark_retrieval_backends.py` compares `sql_json`, Chroma, and pgvector when a pgvector database is configured.
-- `backend/scripts/benchmark_generation_latency.py` measures structured generation latency and output shape by task type.
-- `backend/scripts/audit_endpoint_acl.py` audits FastAPI routes for principal dependency coverage.
+- `backend/scripts/eval_authorized_rag.py` evaluates retrieval against an authorized private corpus.
 
-Known benchmark limitations:
+Known limitations:
 
-- Evaluation is based on synthetic documents unless replaced with authorized private datasets.
+- The public corpus is synthetic and small; re-measure against your own corpus before quoting any retrieval number.
 - The local lexical retriever is not a replacement for production embeddings or reranking.
-- Token usage and cost are not exposed by the current provider wrapper.
-- Production retrieval claims should be re-measured against the deployment's target corpus and backend.
+- The generation benchmark above uses MockProvider, so it measures schema shape and plumbing, not model quality.
+- Physics results are deterministic and unit-tested, but a stable cavity on paper is not a guarantee of lasing: pump-mode overlap, coating losses, and alignment still decide the outcome.
 
 ## Quick Start on Windows
 
@@ -212,11 +241,22 @@ AI_PROVIDER=mock
 STRICT_PROVIDER=false
 
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-5
 OPENAI_BASE_URL=https://api.openai.com/v1
 
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-sonnet-4-5
+
+# Chinese providers (OpenAI-compatible). Set AI_PROVIDER to the vendor name and
+# fill in the matching key; base URLs have working defaults.
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-chat
+QWEN_API_KEY=
+QWEN_MODEL=qwen-plus
+ZHIPU_API_KEY=
+ZHIPU_MODEL=glm-4-plus
+MOONSHOT_API_KEY=
+MOONSHOT_MODEL=moonshot-v1-8k
 
 DATABASE_URL=sqlite:///./laserclaw.db
 UPLOAD_DIR=./uploads
@@ -238,9 +278,12 @@ VITE_API_URL=http://127.0.0.1:8000
 
 Provider modes:
 
-- `mock`: deterministic local demo mode
+- `mock`: deterministic local demo mode (fixed templates; the UI shows a demo-mode banner)
+- `deepseek` / `qwen` / `zhipu` / `moonshot`: Chinese vendors (DeepSeek, Qwen/DashScope, Zhipu GLM, Moonshot Kimi) served over the OpenAI-compatible client
 - `openai`: OpenAI-compatible Chat Completions provider
 - `anthropic`: Anthropic provider
+
+See `.env.example` for the full annotated template.
 
 Use `STRICT_PROVIDER=true` for strict evaluation so missing or unavailable real providers fail clearly instead of falling back to MockProvider.
 
@@ -337,6 +380,11 @@ Core endpoints:
 - `POST /api/cases/modules/{module_id}/run`
 - `GET /api/cases/{case_id}/components`
 - `GET /api/cases/{case_id}/components/procurement.csv`
+- `POST /api/inventory/import`
+- `GET /api/inventory/items`
+- `GET /api/inventory/sources`
+- `DELETE /api/inventory/items`
+- `POST /api/inventory/match`
 
 ## Project Structure
 
@@ -348,10 +396,13 @@ LaserClaw/
 |   |   |-- api/            # FastAPI routes
 |   |   |-- auth/           # API-key auth, roles, and project-level ACL
 |   |   |-- evals/          # JSONL dataset loading and retrieval metrics
+|   |   |-- inventory/      # workbook parsing, import, parameter-level evaluator
 |   |   |-- knowledge/      # ingestion, chunking, embeddings, retrieval
 |   |   |-- models/         # SQLAlchemy models
 |   |   |-- observability/  # audit and usage accounting
-|   |   |-- providers/      # Mock, OpenAI, Anthropic
+|   |   |-- physics/        # deterministic kernel: ABCD/Gaussian, TMM, phase matching,
+|   |   |                   #   cavity design search, power-curve fits (pure numpy)
+|   |   |-- providers/      # Mock, OpenAI-compatible (OpenAI/DeepSeek/Qwen/Zhipu/Moonshot), Anthropic
 |   |   `-- schemas/
 |   |-- alembic/
 |   |-- scripts/
@@ -361,6 +412,7 @@ LaserClaw/
 |-- frontend/
 |   |-- src/
 |   |   |-- api/
+|   |   |-- components/
 |   |   |-- pages/
 |   |   |-- LanguageContext.jsx
 |   |   `-- i18n.js
