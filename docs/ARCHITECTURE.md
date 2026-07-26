@@ -193,7 +193,7 @@ RAG 管线文件:`knowledge/ingestion.py`(提取/入库)→ `knowledge/chunking.
 (local 稀疏 / openai / sentence-transformers)→ `knowledge/vector_store.py`(sql_json / chroma / pgvector)
 → `knowledge/retrieval.py`(两级检索+置信度+no-answer)→ `knowledge/reranking.py`。
 Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `anthropic.py`,工厂在 `providers/__init__.py`。
-**大陆模型**:`AI_PROVIDER` 可设为 `deepseek` / `qwen`(阿里 DashScope 兼容模式)/ `zhipu`(智谱 GLM)/ `moonshot`(Kimi)——四家均为 OpenAI 兼容端点,复用 `OpenAIProvider` 并注入各自 `base_url`/默认模型;缺少对应 `*_API_KEY` 时自动回退 MockProvider(配置见 `config.py` 与 `.env.example`)。
+**国内模型**:`AI_PROVIDER` 可设为 `deepseek` / `qwen`(阿里 DashScope 兼容模式)/ `zhipu`(智谱 GLM)/ `moonshot`(Kimi)——四家均为 OpenAI 兼容端点,复用 `OpenAIProvider` 并注入各自 `base_url`/默认模型;缺少对应 `*_API_KEY` 时自动回退 MockProvider(配置见 `config.py` 与 `.env.example`)。
 
 ---
 
