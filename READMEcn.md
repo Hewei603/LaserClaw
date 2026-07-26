@@ -22,13 +22,15 @@ LaserClaw 是一个面向激光实验工作流的本地优先 **RAG Agent 工作
 - **全局知识库**：支持上传 PDF、TXT、Markdown、CSV、JSON、TSV、log 等共享文档。
 - **知识库治理**：支持 source status、version、owner、reviewer、review time 和 reindex。
 - **Tool-calling Agent 工作流**：自动路由普通聊天、实验计划、故障排查、实验报告和物理计算模块(谐振腔设计、相位匹配、镀膜评估、元件匹配、功率曲线)。
+- **确定性物理内核**(纯 numpy):ABCD/高斯光束腔分析与**腔型设计搜索**(按实测热透镜裕度排序)、薄膜 TMM 镀膜评估、单轴/双轴相位匹配、功率曲线阈值与斜率效率拟合(含 Findlay-Clay / Caird 腔损耗反推)。实验计划里的几何与角度**是算出来的**,不是模型编的。
+- **结构化元件库**:导入实验室元件清单(.xlsx),把镀膜/曲率/口径解析成结构化数据,按波长×功能做数据库级筛选,并针对需求逐参数判定(可用 / 需实测 / 淘汰,含非支配前沿)。腔型设计搜索只会推荐库里真有的镜子。
 - **结构化 AI artifact**：保存 plan、troubleshooting、report、image analysis、物理模块结果等生成内容。
 - **Prompt/workflow 版本管理**：维护 active prompt 和 workflow version，支持可复现 AI 运行。
 - **Case bundle 导出**：导出完整 Case 包，包含 manifest、附件、生成内容和知识源元数据。
 - **项目级 ACL**：Case、知识检索、附件、生成、Agent task、Case module 和 bundle export 都遵循项目权限。
 - **RAG eval 与 benchmark**：提供脚本和 API，评估检索准确率、延迟、索引吞吐和 LLM JSON 可靠性。
 - **检索后端**：支持确定性的 `sql_json`、Chroma、pgvector，以及可选 cross-encoder reranking。
-- **Provider 支持**：MockProvider、OpenAI-compatible Chat Completions、Anthropic。
+- **Provider 支持**：MockProvider、OpenAI-compatible Chat Completions(OpenAI、DeepSeek、通义千问/DashScope、智谱 GLM、Moonshot Kimi)、Anthropic。
 - **双语 UI**：支持中英文界面切换。
 
 ## 技术架构
@@ -41,7 +43,9 @@ React + Vite 前端
       -> 本地 SQLite 或 Docker PostgreSQL/pgvector
       -> 文件上传和全局知识文档
       -> RAG 文档解析、切块、embedding、检索、citation
-      -> OpenAI / Anthropic / Mock provider
+      -> 确定性物理内核(ABCD/高斯腔、薄膜 TMM、相位匹配、功率曲线拟合)—— 纯 numpy,不经过 LLM
+      -> 结构化元件库(清单解析 + 逐参数评估器)
+      -> OpenAI 兼容 / Anthropic / Mock provider
       -> 审计日志、usage、Agent trace、generated artifact
 ```
 
@@ -101,35 +105,64 @@ LaserClaw 有两类检索来源：
 
 ## 当前评测证据
 
-公开 benchmark 使用 synthetic documents，这样仓库可以在没有私有实验室数据的情况下测试。这些文档不是真实实验室制度、设备数据或安全培训材料。
+下面每个数字都可以用旁边的命令在本仓库复现,配置为**默认本地配置**
+(`EMBEDDING_PROVIDER=local`、`RETRIEVAL_BACKEND=sql_json`、`AI_PROVIDER=mock`)。
+测量时间 2026-07-26。每条命令都会把 JSON 报告写到 `docs/benchmarks/`,该目录**已 gitignore**
+——因为报告可能索引到私有实验室文档,所以请在本地自行重跑生成,而不是依赖仓库里的副本。
 
-| 项目 | 值 |
-|---|---|
-| 最近本地 benchmark 使用的 Provider | OpenAIProvider |
-| 当次配置模型 | `gpt-5` via OpenRouter |
-| RAG retrieval queries | 50 |
-| Tool routing instructions | 80 |
-| Structured artifact generations | 20 |
-| End-to-end Agent tasks | 10 |
-| Backend tests | 161 passed, 2 skipped |
+检索语料是**合成的**(不是真实实验室制度、设备数据或安全培训材料),而且规模很小
+(3 个文档源、5 个分块、10 条带标注的查询)。因此这些检索数字只说明**流程是通的**,
+**不是**对生产规模准确率的声明。
+
+| 检查项 | 结果 | 复现命令 |
+|---|---|---|
+| 后端测试套件 | 292 passed, 2 skipped | `cd backend && py -m pytest -q` |
+| 物理内核对拍(解析解/文献值) | 已含在上面(TMM 与独立的 `tmm` 库对拍至机器精度) | `py -m pytest tests/test_physics_*.py -q` |
+| 意图路由用例 | 57 passed | `py -m pytest tests/test_router.py -q` |
+| RAG 数据集断言 | 8 passed(37 条查询数据集) | `py -m pytest tests/eval_rag_dataset.py -q` |
+| Agent 轨迹完整性 | 7 passed | `py -m pytest tests/eval_agent_trace.py -q` |
+| API 鉴权依赖审计 | 74 条 `/api/*` 路由,0 findings | `py scripts/audit_endpoint_acl.py` |
+| 前端 lint/build | 通过 | `cd frontend && npm run lint && npm run build` |
+
+合成语料上的检索质量与延迟
+(报告:`docs/benchmarks/resume_metrics_*.json`):
 
 | 指标 | 结果 |
 |---|---:|
-| RAG Top-1 hit rate | 95.45% |
-| RAG Top-3 hit rate | 97.73% |
-| RAG MRR | 0.9678 |
-| Citation correctness | 82.00% |
-| Tool routing accuracy | 80.00% |
-| Schema pass rate | 100.00% |
-| End-to-end task success rate | 100.00% |
-| Trace completeness | 100.00% |
+| Recall@1 | 90.00% |
+| Recall@3 | 100.00% |
+| Recall@5 | 100.00% |
+| MRR | 0.95 |
+| 查询延迟 p50 / p95 | 12.7 ms / 14.4 ms |
+| 索引吞吐 | 103.9 块/秒 |
 
-已知限制：
+复现:`py scripts/benchmark_resume_metrics.py --repeats 3 --skip-llm`
+(10 条标注查询 × 3 轮 = 30 次查询,top_k=5)。
 
-- 默认评测基于 synthetic documents，除非替换为授权的私有数据集。
+结构化生成的输出形状与延迟(MockProvider,
+`docs/benchmarks/latest_generation_latency.json`):
+
+| 模式 | 次数 | Schema 通过率 | p50 延迟 |
+|---|---:|---:|---:|
+| plan | 3 | 100% | 658 ms |
+| troubleshooting | 3 | 100% | 47 ms |
+| report | 3 | 100% | 46 ms |
+
+复现:`py scripts/benchmark_generation_latency.py --repeats 3`。
+这里的延迟是确定性模板路径;接真实模型后延迟由模型主导
+(用 `gpt-5` 生成一份实验计划约需 60–120 秒)。
+
+其他 benchmark 脚本:
+
+- `backend/scripts/benchmark_retrieval_backends.py`:配好 pgvector 数据库后,对比 `sql_json`、Chroma、pgvector。
+- `backend/scripts/eval_authorized_rag.py`:在授权的私有语料上评测检索。
+
+已知限制:
+
+- 公开语料是合成的且规模很小;引用任何检索数字前请在你自己的语料上重测。
 - 本地词法检索不能替代生产级 embedding 或 reranking。
-- 当前 provider wrapper 还没有暴露 token usage 和 cost。
-- 生产检索能力应基于目标语料和目标后端重新评测。
+- 上面的生成 benchmark 用的是 MockProvider,衡量的是 schema 形状与链路,不是模型质量。
+- 物理结果是确定性的且有单元测试,但**纸面上稳定的腔不等于一定能出光**:泵浦模式重叠、镀膜损耗、对准质量仍然决定成败。
 
 ## Windows 快速启动
 
@@ -210,13 +243,13 @@ AI_PROVIDER=mock
 STRICT_PROVIDER=false
 
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-5
 OPENAI_BASE_URL=https://api.openai.com/v1
 
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-sonnet-4-5
 
-# 大陆模型厂商(推荐):AI_PROVIDER 填厂商名 + 对应 key
+# 国内模型厂商(推荐):AI_PROVIDER 填厂商名 + 对应 key
 DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-chat
 QWEN_API_KEY=
@@ -247,7 +280,7 @@ VITE_API_URL=http://127.0.0.1:8000
 Provider 模式：
 
 - `mock`：确定性的本地 demo 模式(输出为固定模板,页面顶部会显示演示模式横幅)
-- `deepseek` / `qwen` / `zhipu` / `moonshot`：大陆模型厂商(DeepSeek、通义千问、智谱 GLM、Kimi),填对应 `*_API_KEY` 即可
+- `deepseek` / `qwen` / `zhipu` / `moonshot`：国内模型厂商(DeepSeek、通义千问、智谱 GLM、Kimi),填对应 `*_API_KEY` 即可
 - `openai`：OpenAI-compatible Chat Completions provider
 - `anthropic`：Anthropic provider
 
@@ -325,7 +358,6 @@ py scripts\tune_retrieval_thresholds.py --dataset ..\docs\evals\private\rag_eval
 - `POST /api/cases/{case_id}/generate-plan`
 - `POST /api/cases/{case_id}/generate-troubleshooting`
 - `POST /api/cases/{case_id}/generate-report`
-- `POST /api/cases/{case_id}/generate-rezonator`
 - `POST /api/knowledge/sources/upload`
 - `GET /api/knowledge/sources`
 - `PATCH /api/knowledge/sources/{source_id}/governance`
@@ -344,6 +376,11 @@ py scripts\tune_retrieval_thresholds.py --dataset ..\docs\evals\private\rag_eval
 - `POST /api/cases/modules/{module_id}/run`
 - `GET /api/cases/{case_id}/components`
 - `GET /api/cases/{case_id}/components/procurement.csv`
+- `POST /api/inventory/import`
+- `GET /api/inventory/items`
+- `GET /api/inventory/sources`
+- `DELETE /api/inventory/items`
+- `POST /api/inventory/match`
 
 ## 项目结构
 
@@ -354,11 +391,14 @@ LaserClaw/
 |   |   |-- agent/          # context, routing, planner, orchestrator, tools
 |   |   |-- api/            # FastAPI routes
 |   |   |-- auth/           # API-key auth, roles, project-level ACL
-|   |   |-- evals/          # JSONL dataset loading and retrieval metrics
-|   |   |-- knowledge/      # ingestion, chunking, embeddings, retrieval
-|   |   |-- models/         # SQLAlchemy models
-|   |   |-- observability/  # audit and usage accounting
-|   |   |-- providers/      # Mock, OpenAI, Anthropic
+|   |   |-- evals/          # 检索评测数据集与指标
+|   |   |-- inventory/      # 元件清单解析、导入、逐参数评估器
+|   |   |-- knowledge/      # 文档解析、切块、embedding、检索
+|   |   |-- models/         # SQLAlchemy 模型
+|   |   |-- observability/  # 审计与 usage 记账
+|   |   |-- physics/        # 确定性物理内核:ABCD/高斯、TMM、相位匹配、
+|   |   |                   #   腔型设计搜索、功率曲线拟合(纯 numpy)
+|   |   |-- providers/      # Mock、OpenAI 兼容(OpenAI/DeepSeek/通义/智谱/Kimi)、Anthropic
 |   |   `-- schemas/
 |   |-- alembic/
 |   |-- scripts/
@@ -368,6 +408,7 @@ LaserClaw/
 |-- frontend/
 |   |-- src/
 |   |   |-- api/
+|   |   |-- components/
 |   |   |-- pages/
 |   |   |-- LanguageContext.jsx
 |   |   `-- i18n.js
