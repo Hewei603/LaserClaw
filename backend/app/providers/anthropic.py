@@ -12,17 +12,30 @@ from ..config import get_settings
 from ..observability.usage import attach_usage_payload
 
 try:
-    from anthropic import Anthropic, APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
+    from anthropic import (
+        Anthropic,
+        APIConnectionError,
+        APITimeoutError,
+        AuthenticationError,
+        InternalServerError,
+        PermissionDeniedError,
+        RateLimitError,
+    )
 
+    # Same discipline as the OpenAI path: APIStatusError must NOT be here, it is
+    # the parent of AuthenticationError/PermissionDeniedError and retrying those
+    # only turns "the key is wrong" into a misleading "service unavailable".
     ANTHROPIC_RETRYABLE_ERRORS = (
         APIConnectionError,
         APITimeoutError,
         RateLimitError,
-        APIStatusError,
+        InternalServerError,
     )
+    ANTHROPIC_FATAL_ERRORS = (AuthenticationError, PermissionDeniedError)
 except ImportError:
     Anthropic = None
     ANTHROPIC_RETRYABLE_ERRORS = ()
+    ANTHROPIC_FATAL_ERRORS = ()
 
 
 logger = logging.getLogger(__name__)
@@ -253,6 +266,15 @@ Return JSON with this shape:
                     "output_tokens": getattr(usage, "output_tokens", None),
                 }
                 return self._message_text(response), usage_payload
+            except ANTHROPIC_FATAL_ERRORS as exc:
+                # Never retryable: say what it actually is instead of hiding it
+                # behind a generic "service unavailable" after two attempts.
+                logger.error("Anthropic auth/permission failure: %s", exc)
+                raise RuntimeError(
+                    f"API key 无效或无权限:请检查 .env 中的 ANTHROPIC_API_KEY 是否正确、账户是否有额度。"
+                    f"(原始错误:{type(exc).__name__})"
+                ) from exc
+
             except ANTHROPIC_RETRYABLE_ERRORS as exc:
                 last_error = exc
                 logger.warning(
@@ -264,15 +286,15 @@ Return JSON with this shape:
                 if attempt == 0:
                     await asyncio.sleep(1)
                     continue
-            except Exception as exc:
-                last_error = exc
+            except Exception:
+                # Unknown failures are not silently retried: a retry loop that
+                # swallows everything hides real bugs behind a latency spike.
                 logger.exception("Unexpected Anthropic provider error")
-                if attempt == 0:
-                    await asyncio.sleep(1)
-                    continue
+                raise
 
         raise RuntimeError(
-            f"Anthropic provider failed after retry: {type(last_error).__name__}: {str(last_error)[:500]}"
+            f"模型服务暂时不可用(已重试):{type(last_error).__name__}。请稍后重试;"
+            f"若持续失败,请检查网络与 .env 配置。"
         )
 
     @staticmethod
