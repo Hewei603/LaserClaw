@@ -22,9 +22,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
-from ..models import InventoryItem
+from ..models import InventoryItem, InventoryLoan
+from ..models.inventory import resolve_condition
 from ..physics.archetypes import stopband_edges
 from ..physics.materials import n_real
 
@@ -220,27 +222,44 @@ def _judge_coating_requirement(req: dict, item: InventoryItem) -> dict:
     return best
 
 
-def evaluate_item(item: InventoryItem, requirement: dict) -> dict:
-    """Produce the structured verdict of one inventory item vs a requirement spec."""
+def evaluate_item(item: InventoryItem, requirement: dict, loaned_qty: float = 0.0) -> dict:
+    """Produce the structured verdict of one inventory item vs a requirement spec.
+
+    ``loaned_qty`` is how much of this item is currently signed out. It defaults
+    to zero so a caller with no loan context (and every existing test) evaluates
+    against the full stock exactly as before.
+    """
     hard: list[str] = []
     must_measure: list[str] = []
     unknowns: list[str] = []
     params: dict[str, Any] = {}
 
-    # condition (descriptive -> flags)
-    if item.condition == "damaged":
+    # condition (descriptive -> flags); a human verdict outranks the parsed one.
+    # getattr so the evaluator stays callable with any object carrying the L0
+    # fields, not only the ORM row.
+    condition = resolve_condition(item.condition, getattr(item, "condition_manual", None))
+    if condition == "damaged":
         hard.append("元件标注损坏(破裂/无法维修)")
-    elif item.condition == "uncertain":
+    elif condition == "uncertain":
         unknowns.append("元件状态不确定(如 切向未知/不能确定镀膜)")
         must_measure.append("确认元件实际状态")
-    params["condition"] = {"status": item.condition}
+    params["condition"] = {"status": condition,
+                          "manually_marked": bool(getattr(item, "condition_manual", None))}
 
-    # quantity
+    # quantity — what is on the shelf, not what the workbook says the lab owns.
+    # Recommending three mirrors that are all signed out is worse than
+    # recommending none: the student walks to the cupboard and finds it empty.
     need_qty = float(requirement.get("quantity", 1))
-    have_qty = float(item.quantity or 0)
+    total_qty = float(item.quantity or 0)
+    on_loan = float(loaned_qty or 0)
+    have_qty = total_qty - on_loan
     if have_qty < need_qty:
-        hard.append(f"数量不足(需 {need_qty:g},有 {have_qty:g})")
-    params["quantity"] = {"have": have_qty, "need": need_qty}
+        if on_loan > 0:
+            hard.append(f"可用数量不足(需 {need_qty:g},库存 {total_qty:g},已借出 {on_loan:g})")
+        else:
+            hard.append(f"数量不足(需 {need_qty:g},有 {total_qty:g})")
+    params["quantity"] = {"have": have_qty, "need": need_qty,
+                          "total": total_qty, "on_loan": on_loan}
 
     # ROC (continuous, hard gate + margin)
     want_roc = requirement.get("roc_mm")
@@ -373,7 +392,16 @@ def evaluate_candidates(db: Session, requirement: dict) -> dict:
         query = query.filter(InventoryItem.category == category)
     items = query.all()
 
-    verdicts = [evaluate_item(item, requirement) for item in items]
+    # One grouped query rather than a loan lookup per item.
+    open_loans = dict(
+        db.query(InventoryLoan.item_id, func.coalesce(func.sum(InventoryLoan.quantity), 0.0))
+        .filter(InventoryLoan.returned_at.is_(None))
+        .group_by(InventoryLoan.item_id)
+        .all()
+    )
+
+    verdicts = [evaluate_item(item, requirement, float(open_loans.get(item.id, 0.0)))
+                for item in items]
     eligible = [v for v in verdicts if v["eligible"]]
     rejected = [v for v in verdicts if not v["eligible"]]
 

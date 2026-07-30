@@ -10,6 +10,7 @@ import InventoryPage from './pages/InventoryPage';
 import LabDocuments from './pages/LabDocuments';
 import { LanguageProvider, useLanguage } from './LanguageContext';
 import './App.css';
+import './print.css';
 import logo from './assets/logo.png';
 
 function NavBar() {

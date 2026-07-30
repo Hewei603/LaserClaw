@@ -51,7 +51,7 @@ def _cavity_elements(l_mm: float, r2_mm: float, r1_mm: float, crystal: dict | No
     list of :class:`beam.Element` used to trace spot sizes at each plane.
     """
     if not crystal:
-        fwd = [B.Element("M1 -> M2", B.free_space(l_mm), 1.0)]
+        fwd = [B.Element("M1 -> M2", B.free_space(l_mm), 1.0, l_mm)]
         rev = [B.Element("M2 -> M1", B.free_space(l_mm), 1.0)]
     else:
         n = float(crystal["n"])
@@ -61,12 +61,12 @@ def _cavity_elements(l_mm: float, r2_mm: float, r1_mm: float, crystal: dict | No
         if pos < 0 or air2 < 0:
             raise ValueError(f"crystal (position {pos} mm, thickness {t} mm) does not fit in L={l_mm} mm")
         fwd = [
-            B.Element("M1 -> crystal", B.free_space(pos), 1.0),
+            B.Element("M1 -> crystal", B.free_space(pos), 1.0, pos),
             B.Element("crystal entrance", B.interface_flat(1.0, n), n),
-            B.Element("crystal center", B.free_space(t / 2.0), n),
-            B.Element("crystal second half", B.free_space(t / 2.0), n),
+            B.Element("crystal center", B.free_space(t / 2.0), n, t / 2.0),
+            B.Element("crystal second half", B.free_space(t / 2.0), n, t / 2.0),
             B.Element("crystal exit", B.interface_flat(n, 1.0), 1.0),
-            B.Element("crystal -> M2", B.free_space(air2), 1.0),
+            B.Element("crystal -> M2", B.free_space(air2), 1.0, air2),
         ]
         rev = [
             B.Element("M2 -> crystal", B.free_space(air2), 1.0),
@@ -77,6 +77,88 @@ def _cavity_elements(l_mm: float, r2_mm: float, r1_mm: float, crystal: dict | No
         ]
     round_trip = [el.M for el in fwd] + [B.mirror_curved(r2_mm)] + [el.M for el in rev] + [B.mirror_curved(r1_mm)]
     return round_trip, fwd
+
+
+def beam_envelope(
+    l_mm: float,
+    r1_mm: float,
+    r2_mm: float,
+    wavelength_nm: float,
+    crystal: dict | None,
+    samples: int = 180,
+) -> dict[str, Any]:
+    """Sample the cold-cavity eigenmode radius w(z), z PHYSICAL in mm from M1.
+
+    Exists so a layout drawing is rendered from computed physics instead of from
+    a Gaussian formula reimplemented in the UI: the caller only maps mm to pixels.
+
+    Two things this deliberately does not do:
+
+    * It does not reduce the crystal to :func:`beam.slab`.  A slab collapses the
+      medium to an equivalent air length, which destroys the physical z axis and
+      hides that the beam diverges more slowly inside the crystal.  Instead it
+      walks the very elements :func:`_cavity_elements` builds — one source of
+      geometry, so the drawing cannot drift from the analysis.
+    * It does not report :func:`beam.waist_from_q`'s distance as the waist
+      position.  With a crystal in the path that distance is a reduced
+      (optical-path) length, off by ``t(1 - 1/n)``.  The waist is instead solved
+      per segment from ``Re(q) = 0``, which is exact and independent of the
+      sampling step, and can legitimately land inside the crystal.
+
+    Returns ``{"points": [{z_mm, w_mm, n}], "waist": {...} | None, "note": str}``;
+    ``points`` is empty when the cavity has no confined mode, because drawing an
+    envelope for an unstable cavity would assert something false.
+    """
+    round_trip, fwd = _cavity_elements(l_mm, r2_mm, r1_mm, crystal)
+    q = B.cavity_mode_q(B.system_matrix(round_trip))
+    if q is None:
+        return {"points": [], "waist": None,
+                "note": "该腔长不稳定,没有自洽基模,无法给出光束包络。"}
+
+    span = sum(el.length_mm for el in fwd) or float(l_mm)
+    step = max(span / max(int(samples), 8), 1e-6)
+
+    z = 0.0
+    n_local = 1.0
+    points = [{"z_mm": 0.0, "w_mm": round(B.w_from_q(q, wavelength_nm, n_local), 6), "n": n_local}]
+    waist: dict[str, float] | None = None
+
+    for el in fwd:
+        if el.length_mm <= 0:
+            # Thin element (interface / mirror): acts in place, z unchanged.
+            # w is continuous across a flat interface, so no point is emitted —
+            # a second point at the same z would only add a redundant vertex.
+            q = B.propagate_q(el.M, q)
+            n_local = el.n_after
+            continue
+
+        # Exact waist inside this segment: q(dz) = q + dz, minimal w at Re(q)=0.
+        dz_star = -q.real
+        if 0.0 <= dz_star <= el.length_mm:
+            q_waist = B.propagate_q(B.free_space(dz_star), q)
+            w0 = B.w_from_q(q_waist, wavelength_nm, el.n_after)
+            if waist is None or w0 < waist["w0_mm"]:
+                waist = {"z_mm": round(z + dz_star, 4), "w0_mm": round(w0, 6),
+                         "in_medium_n": el.n_after}
+
+        remaining = float(el.length_mm)
+        while remaining > 1e-9:
+            dz = min(step, remaining)
+            q = B.propagate_q(B.free_space(dz), q)
+            z += dz
+            remaining -= dz
+            points.append({
+                "z_mm": round(z, 4),
+                "w_mm": round(B.w_from_q(q, wavelength_nm, el.n_after), 6),
+                "n": el.n_after,
+            })
+        n_local = el.n_after
+
+    return {
+        "points": points,
+        "waist": waist,
+        "note": "冷腔基模包络(未包含热透镜);z 为距 M1 的物理距离,w 为光斑半径。",
+    }
 
 
 def _analyze_length(l_mm: float, r1_mm: float, r2_mm: float, wavelength_nm: float, crystal: dict | None) -> dict:
@@ -168,6 +250,9 @@ def run_cavity_design(config: dict[str, Any]) -> dict[str, Any]:
             return {"status": "failed", "message": str(exc)}
         base["analysis"] = analysis
         base["placement"] = _placement(l_mm, crystal)
+        # Sampled only for the single geometry being reported — never inside the
+        # scan loop, which evaluates thousands of lengths.
+        base["beam_envelope"] = beam_envelope(l_mm, r1, r2, wavelength_nm, crystal)
         base["summary"] = _summary_line(analysis, wavelength_nm)
         return base
 
@@ -226,6 +311,9 @@ def run_cavity_design(config: dict[str, Any]) -> dict[str, Any]:
             "thermal_lens_tolerance_min_f_mm": None if tol <= 0 else round(1000.0 / tol, 1),
         }
         base["placement"] = _placement(recommended["length_mm"], crystal)
+        base["beam_envelope"] = beam_envelope(
+            recommended["length_mm"], r1, r2, wavelength_nm, crystal
+        )
 
     base["scan"] = {
         "L_range_mm": [start, stop],

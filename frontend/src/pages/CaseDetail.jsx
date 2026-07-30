@@ -476,6 +476,13 @@ function CaseDetail() {
           <div className="action-row">
             {item.model && <span className="meta-pill">{t('caseDetail.modelLabel')}: {item.model}</span>}
             {item.latency_ms != null && <span className="meta-pill">{t('caseDetail.latencyLabel')}: {(item.latency_ms / 1000).toFixed(1)}s</span>}
+            {/* Print lives with the content, not in the page header: only the
+                active tab is mounted, so a header button would print whatever
+                tab happens to be open rather than what the user is looking at. */}
+            <button className="btn btn-secondary" onClick={() => window.print()}
+              title={t('caseDetail.printHint')}>
+              {t('caseDetail.print')}
+            </button>
             <button className="btn btn-secondary" disabled={generating[type]} onClick={() => handleGenerate(type)}>
               {generating[type] ? t('caseDetail.generating') : t('caseDetail.generate')}
             </button>

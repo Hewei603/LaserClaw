@@ -97,9 +97,9 @@ oracle(GPL,已 gitignore,绝不拷贝)。
 | `physics/tmm.py` | 薄膜特征矩阵求解 R/T/A(s/p、任意入射角、复折射率吸收) | 解析解(Fresnel、四分之一波 AR、(HL)ᴺ 闭式)+ **与 Byrnes `tmm` 库 200 随机膜系对拍至机器精度**(`tests/test_physics_tmm.py`、`tests/test_physics_tmm_oracle.py`) |
 | `physics/archetypes.py` | 标称镀膜的"诚实原型":QWOT 阻带区间、对比度括号、AOI 蓝移、s/p 实测分裂 | `tests/test_physics_coating_tool.py` |
 | `physics/coating_tool.py` | 镀膜评估统一入口 `evaluate_coating`:精确膜系 / 厂商曲线 / 标称原型三模式 | 同上 + 对抗回归(`tests/test_physics_adversarial_fixes.py`) |
-| `physics/beam.py` | ABCD 元件矩阵、高斯 q 传播、往返稳定性、自洽本征模、各面光斑(= ReZonator 级内核) | 对称腔/平凹腔/共焦极限闭式解(`tests/test_physics_beam.py`) |
+| `physics/beam.py` | ABCD 元件矩阵、高斯 q 传播、往返稳定性、自洽本征模、各面光斑(= ReZonator 级内核);`Element.length_mm` 记录**物理**长度——矩阵本身给不出它(晶体的 B 项是折合长度、透镜 B=0),画图与包络采样都从这里取 z 轴 | 对称腔/平凹腔/共焦极限闭式解(`tests/test_physics_beam.py`) |
 | `physics/nonlinear.py` | 单轴+双轴主平面相位匹配(所有偏振配对)、走离 | 文献角度:BBO SHG-I 22.8°、THG 31.3°、LBO 11.4°、BiBO 等(`tests/test_physics_nonlinear.py`) |
-| `physics/toolkit.py` | **工作流适配层**(dict→dict):`run_cavity_design`(定长分析/腔长扫描→稳区→推荐几何+元件摆位,未给目标束腰时按**实测热透镜裕度**排序而非 \|m\| 代理;腔长留空默认扫 30–800mm)、`run_phase_match`(接受案例参数别名 `nonlinear_crystal`/`wavelength_nm`/`shg_pm_type`,增益晶体字典不会被误当晶体名)、`run_coating_tmm`;所有 needs_input/failed 提示为中文;REST 与 Agent 共用 | `tests/test_physics_modules.py`、`tests/test_grad_student_ux_fixes.py` |
+| `physics/toolkit.py` | **工作流适配层**(dict→dict):`run_cavity_design`(定长分析/腔长扫描→稳区→推荐几何+元件摆位,未给目标束腰时按**实测热透镜裕度**排序而非 \|m\| 代理;腔长留空默认扫 30–800mm)、`run_phase_match`(接受案例参数别名 `nonlinear_crystal`/`wavelength_nm`/`shg_pm_type`,增益晶体字典不会被误当晶体名)、`run_coating_tmm`、`beam_envelope`(沿**物理** z 逐段采样冷腔基模 w(z),供前端画摆位图;束腰按每段 `Re(q)=0` 解出,**不**把 `waist_from_q` 的折合距离当作物理位置,`w_from_q` 用**局部**折射率——两个约定错一个,晶体处就会画出不存在的台阶) | `tests/test_physics_modules.py`、`tests/test_beam_envelope.py`、`tests/test_grad_student_ux_fixes.py` |
 | `physics/design.py` | **腔型设计搜索**:用户没给镜子时,遍历候选曲率×腔长,两级排序输出可搭建几何——先按束腰匹配粗筛,再对入围者**实测热透镜裕度**(在增益介质处插薄透镜、扫光焦度直至失稳),`score = 0.55×模式惩罚 + 0.45×热稳健性惩罚`;候选曲率优先取自实验室库存 | `tests/test_physics_grounded_plan.py` |
 | `physics/case_context.py` | **案例→物理事实桥接**:实验计划生成前先跑内核(已知几何→分析;未知几何→设计搜索;非线性→相位匹配;标称镀膜→阻带核查),结果作为权威数值注入提示词 | 同上 |
 | `physics/laser_metrics.py` | **测量分析**:功率曲线阈值+斜率效率拟合(自动线性区检测)、Findlay-Clay / Caird 跨曲线腔损耗分析 | 合成数据还原真值(`tests/test_power_curve.py`) |
@@ -119,8 +119,23 @@ oracle(GPL,已 gitignore,绝不拷贝)。
 | `inventory/parser.py` | L0 | 镀膜字符串语法解析:面标记(S1/S2)、功能(HR/AR/HT/`T=x%`→PR)、阈值(`R>99.5%`)、波段(`1064-1066`)、多波长(`880&1053+1314`、`914/517`)、全角归一(NFKC)、裸波长归组;几何(`R=-100`/平镜/`D=25.4mm`/`3*3*5mm3`/`θ=159.6°`/c-cut/掺杂);**未知/损坏标记显式保留,不猜** |
 | `inventory/importer.py` | L0 | xlsx 工作簿 → `InventoryItem` + 每面×每波段 `CoatingSpec` 行;前向填充组;导入报告含**待复核队列**(parse_confidence != parsed) |
 | `inventory/evaluator.py` | L1 | 需求 spec → 逐参数判定档案(**不压成单一分数**):连续量硬门+裕度(曲率/口径)、**标称波长三态**(design_match / maybe_usable / off,off-design 走 `physics/archetypes` 阻带先验)、功能族规则(同面相反功能=conflict 否决)、未知→must_measure;硬伤一票否决;幸存者**支配排序**输出非支配前沿 |
-| `models/inventory.py` | — | 两张表定义;迁移:`alembic/versions/20260724_0008_structured_inventory.py` |
-| `api/inventory.py` | — | `/import`(reviewer 门,幂等按来源文件替换)、`/items`(SQL 级波长×功能过滤)、`/match`(L1) |
+| `models/inventory.py` | — | 三张表定义;迁移:`0008_structured_inventory` + `0009_inventory_loans` |
+| `api/inventory.py` | — | `/import`(reviewer 门,幂等按来源文件替换)、`/items`(SQL 级波长×功能过滤)、`/match`(L1)、借还与损坏标记(见下) |
+
+**借还与损坏(`inventory_loans` + `condition_manual`)**——两条约束决定了表结构:
+
+- `InventoryItem.quantity` **永不递减**。导入器每次重新导入都会按工作簿重写它,任何记在这一列上的
+  借出账都会被静默还原、库存凭空变多。可用量因此是**推导**出来的:
+  `available = quantity − Σ(未归还借出)`,`/items` 附带 `on_loan_qty` / `available_qty`。
+- 人工标注的损坏写在 `condition_manual`,而不是解析得到的 `condition`。导入器拥有后者,
+  会在下次导入时覆盖——把人的判断记在那里,等于让一块崩边的镜子在重新导入后复活并重新进入匹配结果。
+  优先级由 `models/inventory.py::resolve_condition()` 单点定义(人工 > 解析),
+  ORM 属性与 L1 评估器共用同一条规则。
+- 有未归还记录时**拒绝**重新导入同一来源文件(409)。重新导入会作废旧 item id,而 SQLite 会复用 rowid,
+  未归还记录将悄悄指向另一件元件——这是无法事后发现的数据损坏,只能拒绝。
+- 归还不删记录(`returned_at` 置位)。"上次坏掉时是谁在用"正是实验室会问的问题,删掉就答不出来了。
+- L1 评估器读的是**可用量与人工状态**:借光的、标损坏的元件不会出现在匹配结果里
+  (淘汰理由显式给出:`元件标注损坏` / `可用数量不足(...已借出 N)`)。
 
 判定档案示例字段:`hard_violations / parameters.coatings[].status / unknowns / must_measure / frontier`。
 "maybe_usable" 一律注明依据(原型阻带区间)并列入实测清单——**标签不是曲线,系统不假装知道**。
@@ -182,12 +197,20 @@ oracle(GPL,已 gitignore,绝不拷贝)。
 | `models/case_module.py` | `case_modules` / `case_module_files` / `case_component_items` |
 | `models/agent.py` | `agent_tasks` / `agent_steps` / `agent_tool_calls` / 会话 / 记忆 |
 | `models/knowledge.py` | `knowledge_sources` / `knowledge_chunks` / `retrieval_runs` / `retrieval_results` |
-| `models/inventory.py` | `inventory_items` / `coating_specs` |
+| `models/inventory.py` | `inventory_items` / `coating_specs` / `inventory_loans` |
 | `models/user.py` | 组织/用户/组/项目/成员(ACL 基础) |
 | `models/generated_content.py` `models/attachment.py` `models/audit.py` `models/versioning.py` | 产物/附件/审计/版本/评测 |
 
 迁移链(线性,`backend/alembic/versions/`):
-`20260515_0001` → `0002` → `0003` → `0004` → `0005(pgvector)` → `0006(agent memory)` → `0007(case modules)` → **`20260724_0008(structured inventory)`**。
+`20260515_0001` → `0002` → `0003` → `0004` → `0005(pgvector)` → `0006(agent memory)` → `0007(case modules)`
+→ `20260724_0008(structured inventory)` → **`20260730_0009(inventory loans + 人工损坏标记)`**。
+
+**升级已有数据库**:一键启动器走 `AUTO_CREATE_TABLES=true`(`Base.metadata.create_all`),而 `create_all`
+只建缺失的**表**、不动已存在表的列——新版本加一列,老用户的库就少一列,任何查询都会 `no such column`。
+`database.py::sync_additive_schema()` 因此在启动时补齐**新增的可空列与索引**(仅增量:改类型、删列、
+回填数据仍归 Alembic,遇到无法自动处理的情况只记录警告并提示 `alembic upgrade head`)。
+Docker/生产路径 `AUTO_CREATE_TABLES=false`,以 Alembic 为准。
+不变量测试:`tests/test_schema_upgrade.py`(遍历**全部**模型表,而非当期新增的那一列)。
 
 RAG 管线文件:`knowledge/ingestion.py`(提取/入库)→ `knowledge/chunking.py` → `knowledge/embeddings.py`
 (local 稀疏 / openai / sentence-transformers)→ `knowledge/vector_store.py`(sql_json / chroma / pgvector)
@@ -208,6 +231,10 @@ Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `a
 | `test_physics_modules.py` | 物理工具经 REST 模块 + Agent 任务 + 聊天路由 |
 | `test_power_curve.py` | 功率曲线拟合、跨曲线 Findlay-Clay/Caird、API 往返 |
 | `test_inventory.py` | L0 语法解析、导入、SQL 过滤、L1 三态/硬门/前沿、Agent 路径 |
+| `test_inventory_loans.py` | 借出只减可用量不动库存、超借拒绝、归还留痕、人工损坏标记扛住重新导入、有未归还时拒绝重新导入、批次删除级联 |
+| `test_beam_envelope.py` | 摆位图包络的两个易错约定:物理 z 轴、晶体内外光斑连续(w 连续、只有发散角变) |
+| `test_schema_upgrade.py` | `create_all` 老库升级:遍历**全部**模型表补列补索引;NOT NULL 列不伪造默认值而是告警 |
+| `test_kernel_invariants.py` | 物理内核纯度(AST 检查禁止的 import)+ 两个搜索规模数字 |
 | `test_acl.py` / `test_security_hardening.py` | ACL 与提权/越权回归(角色以 DB 为准、evals 租户隔离、失败回滚) |
 | `test_cases/knowledge_agent/generation/agent_memory/...` | 业务 API 全链路 |
 | CI:`.github/workflows/ci.yml` | ruff、pytest、SQLite 迁移冒烟、真实 Postgres+pgvector 集成、前端 lint/build |
@@ -229,8 +256,9 @@ Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `a
 |---|---|
 | `App.jsx` | 路由与导航(首页 / Agent / 案例 / 实验室文档 / **元件库**) |
 | `pages/CaseDetail.jsx` | 案例详情:概览(结构化参数表)、生成物(分节渲染 + 原始 JSON 折叠)、知识检索、**模块**(分组下拉 + 每模块独立参数框 + 类型化结果)、Agent 任务轨迹、附件;统一错误横幅 |
-| `components/ModuleResults.jsx` | **类型化结果渲染**:功率曲线 SVG(坐标刻度 + 实测点 + 阈值标记)、多曲线对比与腔损耗、相位匹配表、镀膜三态色块、腔设计摆位表、元件匹配前沿 |
-| `pages/InventoryPage.jsx` | 元件库:xlsx 导入、波长×功能 SQL 级筛选、名称搜索、待复核队列、需求匹配 |
+| `components/ModuleResults.jsx` | **类型化结果渲染**:功率曲线 SVG(坐标刻度 + 实测点 + 阈值标记)、多曲线对比与腔损耗、相位匹配表、镀膜三态色块、**腔摆位图(横向真实比例的 SVG:镜面曲率朝向、晶体位置与厚度、束腰位置 + 冷腔基模包络)**、腔设计摆位表、元件匹配前沿 |
+| `print.css` | `@media print`:隐藏导航/按钮、强制白底黑字、SVG 描边改深色、卡片与表格 `break-inside: avoid`。浏览器「打印 → 另存为 PDF」即得可带进实验室的纸质方案(零依赖,矢量图,中文字体走系统) |
+| `pages/InventoryPage.jsx` | 元件库:xlsx 导入、波长×功能 SQL 级筛选、名称搜索、待复核队列、需求匹配、**借出/归还与损坏标记**(数量列在有借出时显示 `可用 / 总数`) |
 | `pages/AgentWorkspace.jsx` | Agent 对话:路由结果 / 任务 / 引用 pill |
 | `api/client.js` | axios 封装 + HTTP 状态码中文提示 |
 | `api/inventory.js` | 元件库 API 客户端 |

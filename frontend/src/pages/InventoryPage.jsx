@@ -26,8 +26,9 @@ function InventoryPage() {
   const [matchResult, setMatchResult] = useState(null);
   const [matching, setMatching] = useState(false);
   const [sources, setSources] = useState([]);
+  const [loans, setLoans] = useState([]);
 
-  useEffect(() => { loadItems(); loadSources(); }, []);
+  useEffect(() => { loadItems(); loadSources(); loadLoans(); }, []);
 
   const loadSources = async () => {
     try {
@@ -37,11 +38,77 @@ function InventoryPage() {
     }
   };
 
+  const loadLoans = async () => {
+    try {
+      setLoans(await inventoryApi.listLoans({ openOnly: true }));
+    } catch {
+      setLoans([]);
+    }
+  };
+
+  // Who currently holds each item, so the row can offer the right action.
+  const loansByItem = loans.reduce((acc, loan) => {
+    (acc[loan.item_id] = acc[loan.item_id] || []).push(loan);
+    return acc;
+  }, {});
+
+  const refresh = () => Promise.all([loadItems(), loadLoans()]);
+
+  const handleBorrow = async (item) => {
+    const borrower = window.prompt(t('inventoryPage.borrowWho'));
+    if (!borrower || !borrower.trim()) return;
+    const purpose = window.prompt(t('inventoryPage.borrowPurpose')) || undefined;
+    try {
+      await inventoryApi.borrow(item.id, { borrower_name: borrower.trim(), quantity: 1, purpose });
+      await refresh();
+    } catch (err) {
+      setError(t('inventoryPage.borrowFailed') + err.message);
+    }
+  };
+
+  const handleReturn = async (loan) => {
+    if (!window.confirm(t('inventoryPage.confirmReturn').replace('{who}', loan.borrower_name))) return;
+    // Returning is when damage is actually discovered, so ask once rather than
+    // making the student find a separate "mark damaged" action afterwards.
+    const broken = window.confirm(t('inventoryPage.askDamagedOnReturn'));
+    const note = broken ? (window.prompt(t('inventoryPage.damageNote')) || undefined) : undefined;
+    try {
+      await inventoryApi.returnLoan(loan.id, {
+        note, condition_on_return: broken ? 'damaged' : undefined,
+      });
+      await refresh();
+    } catch (err) {
+      setError(t('inventoryPage.returnFailed') + err.message);
+    }
+  };
+
+  const handleMarkCondition = async (item) => {
+    const isDamaged = (item.effective_condition || item.condition) === 'damaged';
+    if (isDamaged) {
+      if (!window.confirm(t('inventoryPage.confirmClearDamage'))) return;
+      try {
+        await inventoryApi.setCondition(item.id, { condition: null });
+        await refresh();
+      } catch (err) {
+        setError(t('inventoryPage.conditionFailed') + err.message);
+      }
+      return;
+    }
+    const note = window.prompt(t('inventoryPage.damageNote'));
+    if (note === null) return;
+    try {
+      await inventoryApi.setCondition(item.id, { condition: 'damaged', note: note || undefined });
+      await refresh();
+    } catch (err) {
+      setError(t('inventoryPage.conditionFailed') + err.message);
+    }
+  };
+
   const handleDeleteSource = async (sourceFile) => {
     if (!window.confirm(t('inventoryPage.confirmClearSource'))) return;
     try {
       await inventoryApi.clearItems(sourceFile);
-      await Promise.all([loadItems(), loadSources()]);
+      await Promise.all([loadItems(), loadSources(), loadLoans()]);
     } catch (err) {
       setError(t('inventoryPage.deleteFailed') + err.message);
     }
@@ -76,7 +143,7 @@ function InventoryPage() {
       const report = await inventoryApi.importWorkbook(file);
       setImportReport(report);
       event.target.value = '';
-      await Promise.all([loadItems(), loadSources()]);
+      await Promise.all([loadItems(), loadSources(), loadLoans()]);
     } catch (err) {
       setError(t('inventoryPage.importFailed') + err.message);
     } finally {
@@ -292,14 +359,22 @@ function InventoryPage() {
                 <th>{t('inventoryPage.colCoatings')}</th>
                 <th className="num">{t('inventoryPage.colQty')}</th>
                 <th>{t('inventoryPage.colLocation')}</th>
+                <th>{t('inventoryPage.colLoan')}</th>
               </tr>
             </thead>
             <tbody>
               {items.filter((i) => i.name.toLowerCase().includes(nameQuery.trim().toLowerCase())).map((item) => (
                 <tr key={item.id} className={item.parse_confidence !== 'parsed' ? 'row-review' : ''}>
-                  <td className="name-cell"><strong>{item.name}</strong>{item.condition !== 'ok' && (
-                    <span className="meta-pill">{te(item.condition)}</span>
-                  )}</td>
+                  <td className="name-cell"><strong>{item.name}</strong>
+                    {(item.effective_condition || item.condition) !== 'ok' && (
+                      <span className="meta-pill">{te(item.effective_condition || item.condition)}</span>
+                    )}
+                    {item.condition_manual && (
+                      <span className="meta-pill" title={item.condition_note || ''}>
+                        {t('inventoryPage.manualMark')}
+                      </span>
+                    )}
+                  </td>
                   <td>{geometry(item)}</td>
                   <td>
                     {(item.coatings || []).slice(0, 4).map((coating) => (
@@ -307,8 +382,35 @@ function InventoryPage() {
                     ))}
                     {(item.coatings || []).length > 4 && <span className="muted">+{item.coatings.length - 4}</span>}
                   </td>
-                  <td className="num">{item.quantity}</td>
+                  <td className="num">
+                    {item.available_qty != null && item.available_qty !== item.quantity
+                      ? `${item.available_qty} / ${item.quantity}`
+                      : item.quantity}
+                  </td>
                   <td>{item.location || '-'}</td>
+                  <td className="loan-cell">
+                    {(loansByItem[item.id] || []).map((loan) => (
+                      <span key={loan.id} className="loan-line">
+                        <span className="meta-pill">{loan.borrower_name} ×{loan.quantity}</span>
+                        <button className="btn btn-secondary btn-tiny"
+                          onClick={() => handleReturn(loan)}>
+                          {t('inventoryPage.returnBtn')}
+                        </button>
+                      </span>
+                    ))}
+                    {(item.available_qty == null || item.available_qty > 0)
+                      && (item.effective_condition || item.condition) !== 'damaged' && (
+                      <button className="btn btn-secondary btn-tiny"
+                        onClick={() => handleBorrow(item)}>
+                        {t('inventoryPage.borrowBtn')}
+                      </button>
+                    )}
+                    <button className="btn btn-secondary btn-tiny"
+                      onClick={() => handleMarkCondition(item)}>
+                      {(item.effective_condition || item.condition) === 'damaged'
+                        ? t('inventoryPage.clearDamage') : t('inventoryPage.markDamaged')}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

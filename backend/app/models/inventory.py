@@ -13,6 +13,16 @@ from sqlalchemy.sql import func
 from ..database import Base
 
 
+def resolve_condition(parsed: str | None, manual: str | None) -> str:
+    """A human verdict outranks whatever the workbook text implied.
+
+    Defined once, here, because two consumers need the same precedence: the ORM
+    property below and the evaluator, which is also called with lightweight test
+    doubles that carry no manual column at all.
+    """
+    return manual or parsed or "ok"
+
+
 class InventoryItem(Base):
     """One physical component spec variant in the lab inventory."""
 
@@ -42,12 +52,55 @@ class InventoryItem(Base):
     raw_spec = Column(Text, nullable=True)           # original row text, always kept
     parse_confidence = Column(String(20), default="parsed", index=True)  # parsed|partial|needs_review
     parse_notes = Column(JSON, default=list)         # list of warnings ("切向未知", "裂纹", ...)
-    condition = Column(String(50), default="ok", index=True)  # ok|damaged|uncertain
+    condition = Column(String(50), default="ok", index=True)  # ok|damaged|uncertain — PARSED from the workbook
+    # A person marking a mirror as broken must not have that erased by the next
+    # import: the importer recomputes `condition` from the spreadsheet text every
+    # time, so a human verdict needs somewhere the importer never writes.
+    condition_manual = Column(String(50), nullable=True, index=True)  # ok|damaged|uncertain
+    condition_note = Column(Text, nullable=True)
+    condition_marked_by = Column(String(255), nullable=True)
+    condition_marked_at = Column(DateTime(timezone=True), nullable=True)
     source_file = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     coatings = relationship("CoatingSpec", back_populates="item", cascade="all, delete-orphan")
+    loans = relationship("InventoryLoan", back_populates="item", cascade="all, delete-orphan")
+
+    @property
+    def effective_condition(self) -> str:
+        return resolve_condition(self.condition, self.condition_manual)
+
+
+class InventoryLoan(Base):
+    """One borrowing of an inventory item; open while ``returned_at`` is NULL.
+
+    A separate table rather than fields on the item, because one item row can
+    have a quantity of three and be signed out by three different people. It also
+    keeps the history: "who had it last time it came back broken" is exactly the
+    question a lab asks, and it is unanswerable if returning deletes the record.
+
+    ``InventoryItem.quantity`` is deliberately never decremented — the importer
+    overwrites it from the workbook on every re-import, so any bookkeeping stored
+    there would be silently reverted. Availability is derived instead.
+    """
+
+    __tablename__ = "inventory_loans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("inventory_items.id"), nullable=False, index=True)
+    # Local single-user mode has no authentication, so user_id is usually NULL.
+    # The typed-in name is what actually answers "who has it".
+    borrower_name = Column(String(255), nullable=False)
+    borrower_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    quantity = Column(Float, default=1, nullable=False)
+    purpose = Column(Text, nullable=True)
+    borrowed_at = Column(DateTime(timezone=True), server_default=func.now())
+    expected_return_at = Column(DateTime(timezone=True), nullable=True)
+    returned_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    returned_note = Column(Text, nullable=True)
+
+    item = relationship("InventoryItem", back_populates="loans")
 
 
 class CoatingSpec(Base):
