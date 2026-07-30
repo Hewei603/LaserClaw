@@ -118,6 +118,21 @@ async def test_mock_output_is_labelled_as_demo():
     assert "演示模式" in chat["message"]
 
 
+def test_anthropic_auth_errors_are_not_retryable():
+    """Same class-hierarchy trap as OpenAI: APIStatusError is the PARENT of
+    AuthenticationError, so putting it in the retryable set silently retries a
+    wrong key and reports it as "service unavailable"."""
+    anthropic = pytest.importorskip("anthropic")
+    from app.providers.anthropic import ANTHROPIC_FATAL_ERRORS, ANTHROPIC_RETRYABLE_ERRORS
+
+    assert anthropic.AuthenticationError in ANTHROPIC_FATAL_ERRORS
+    assert anthropic.APIStatusError not in ANTHROPIC_RETRYABLE_ERRORS
+    for fatal in ANTHROPIC_FATAL_ERRORS:
+        assert not issubclass(fatal, tuple(ANTHROPIC_RETRYABLE_ERRORS)), (
+            f"{fatal.__name__} is a subclass of a retryable error and would be retried"
+        )
+
+
 def test_openai_auth_errors_are_not_retryable():
     openai = pytest.importorskip("openai")
     from app.providers.openai import OPENAI_FATAL_ERRORS, OPENAI_RETRYABLE_ERRORS

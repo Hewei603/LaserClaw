@@ -1,0 +1,107 @@
+/* Print / Save-as-PDF styling for the experiment plan.
+ *
+ * Kept in its own file because printing is a distinct concern with a distinct
+ * failure mode: it breaks silently — nobody notices a ruined layout until a
+ * student is standing at the optical table with a black page.
+ *
+ * Why the browser's own print pipeline rather than a PDF library: the content
+ * is Chinese, and only the browser gets CJK fonts for free from the OS. Every
+ * server- or JS-side PDF generator needs a bundled CJK font (10–20 MB) and
+ * either rasterises the SVG or supports only a subset of it. Here the layout
+ * diagram stays vector and the text stays selectable, at zero dependencies.
+ */
+
+@page {
+  size: A4;
+  margin: 16mm 14mm;
+}
+
+@media print {
+  /* Chrome drops backgrounds by default, so a dark theme prints as light text
+     on white — invisible. Everything is forced back to ink on paper. */
+  body,
+  .app,
+  .main-content,
+  .card,
+  .generated-section {
+    background: #fff !important;
+    background-image: none !important;
+    color: #111 !important;
+    box-shadow: none !important;
+  }
+
+  .card,
+  .generated-section {
+    border-color: #bbb !important;
+  }
+
+  .muted,
+  .diagram-caption {
+    color: #444 !important;
+  }
+
+  /* Navigation, tabs and every control are screen furniture. `details` is
+     collapsed on paper anyway; hiding it avoids a stray empty summary line. */
+  .navbar,
+  .footer,
+  .tab-row,
+  .action-row,
+  .btn,
+  .no-print,
+  details {
+    display: none !important;
+  }
+
+  /* A plan that splits a table or the layout diagram across a page break is
+     worse than one that starts lower on the page. */
+  .card,
+  .generated-section,
+  table,
+  svg,
+  .stat-row {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  h1, h2, h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+    color: #111 !important;
+  }
+
+  /* The kernel/model distinction is carried by colour on screen. On paper the
+     colours are dropped, so the physics block keeps an explicit border and the
+     chips keep their fills. */
+  .stat-chip,
+  .disclaimer,
+  .meta-pill {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color: #111 !important;
+  }
+
+  .disclaimer {
+    border-left: 3px solid #888 !important;
+  }
+
+  /* SVG colours come from CSS classes, so they need print overrides too —
+     the teal-on-dark palette is unreadable on white. */
+  .cavity-diagram .axis { stroke: #666 !important; }
+  .cavity-diagram .beam { fill: rgba(0, 0, 0, 0.12) !important; stroke: #222 !important; }
+  .cavity-diagram .mirror { stroke: #000 !important; }
+  .cavity-diagram .crystal { fill: rgba(0, 0, 0, 0.06) !important; stroke: #444 !important; }
+  .cavity-diagram .waist-mark { stroke: #555 !important; }
+  .cavity-diagram .chart-note,
+  .power-chart .chart-note { fill: #111 !important; }
+  .power-chart .axis,
+  .power-chart .fit-flat,
+  .power-chart .threshold-mark { stroke: #555 !important; }
+  .power-chart .fit-line { stroke: #000 !important; }
+  .power-chart .data-point { fill: #000 !important; }
+
+  /* Citations are evidence: a printed plan that cites a source should show
+     which one, not just an underline. */
+  a[href]::after {
+    content: '';
+  }
+}

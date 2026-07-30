@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import admin, agent, attachments, case_modules, cases, collaboration, evals, generation, inventory, knowledge, versioning
 from .config import get_settings
-from .database import Base, engine
+from .database import Base, engine, sync_additive_schema
 from . import models  # noqa: F401 - register SQLAlchemy models
 
 settings = get_settings()
@@ -22,6 +22,9 @@ logger = logging.getLogger("laserclaw")
 
 if settings.auto_create_tables:
     Base.metadata.create_all(bind=engine)
+    # create_all only creates missing tables; a database made by an earlier
+    # release also needs the columns added since. See sync_additive_schema.
+    sync_additive_schema()
 os.makedirs(settings.upload_dir, exist_ok=True)
 
 app = FastAPI(

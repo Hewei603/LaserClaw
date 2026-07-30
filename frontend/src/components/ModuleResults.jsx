@@ -58,6 +58,120 @@ function PowerCurveChart({ fit, units, data }) {
   );
 }
 
+/** Cavity layout: element positions to scale along z, beam envelope exaggerated.
+ *
+ *  Every number here is computed by the backend kernel (`beam_envelope` +
+ *  `element_placement`); this only maps mm to pixels. Nothing Gaussian is
+ *  recomputed in the browser — that is the whole point of having a kernel.
+ *
+ *  The vertical axis cannot be to scale: a 0.25 mm beam in an 85 mm cavity would
+ *  be a hairline. It is exaggerated by a factor that is printed on the drawing,
+ *  because an unlabelled distortion is just a wrong picture.
+ */
+export function CavityLayoutDiagram({ placement, envelope }) {
+  const { t, te } = useLanguage();
+  const points = envelope?.points || [];
+  if (!placement?.length || points.length < 2) return null;
+
+  const W = 460; const H = 150;
+  const PAD_X = 30; const AXIS_Y = 78; const HALF = 44;
+
+  const zEnd = placement[placement.length - 1]?.position_mm || points[points.length - 1].z_mm;
+  if (!zEnd) return null;
+
+  const maxW = Math.max(...points.map((p) => p.w_mm));
+  // Round the exaggeration to something a person can hold in their head.
+  const rawScale = HALF / maxW;
+  const magnification = Math.max(1, Math.round(rawScale / (zEnd / (W - 2 * PAD_X))));
+
+  const x = (mm) => PAD_X + (mm / zEnd) * (W - 2 * PAD_X);
+  const halfHeight = (w) => (w / maxW) * HALF;
+
+  const upper = points.map((p) => `${x(p.z_mm).toFixed(2)},${(AXIS_Y - halfHeight(p.w_mm)).toFixed(2)}`);
+  const lower = [...points].reverse().map(
+    (p) => `${x(p.z_mm).toFixed(2)},${(AXIS_Y + halfHeight(p.w_mm)).toFixed(2)}`,
+  );
+  const beamPath = `M${upper.join(' L')} L${lower.join(' L')} Z`;
+
+  const mirrors = placement.filter((p) => /Mirror/i.test(p.element));
+  const crystalFaces = placement.filter((p) => /Crystal/i.test(p.element));
+  const crystal = crystalFaces.length === 2
+    ? { from: crystalFaces[0].position_mm, to: crystalFaces[1].position_mm }
+    : null;
+
+  return (
+    <div>
+      <svg className="cavity-diagram" viewBox={`0 0 ${W} ${H}`} role="img"
+        aria-label={t('caseDetail.physics.layoutTitle')}>
+        <line className="axis" x1={PAD_X} y1={AXIS_Y} x2={W - PAD_X} y2={AXIS_Y} strokeDasharray="3 3" />
+
+        {crystal && (
+          <g>
+            <rect className="crystal" x={x(crystal.from)} y={AXIS_Y - HALF - 6}
+              width={Math.max(x(crystal.to) - x(crystal.from), 1.5)} height={(HALF + 6) * 2} />
+            <text className="chart-note" x={(x(crystal.from) + x(crystal.to)) / 2} y={AXIS_Y - HALF - 12}
+              textAnchor="middle">{t('caseDetail.physics.crystalLabel')}</text>
+          </g>
+        )}
+
+        <path className="beam" d={beamPath} />
+
+        {envelope.waist && (
+          <g>
+            <line className="waist-mark" x1={x(envelope.waist.z_mm)} y1={AXIS_Y - HALF - 4}
+              x2={x(envelope.waist.z_mm)} y2={AXIS_Y + HALF + 4} />
+            <text className="chart-note" x={x(envelope.waist.z_mm)} y={AXIS_Y + HALF + 18}
+              textAnchor="middle">w₀={envelope.waist.w0_mm} mm</text>
+          </g>
+        )}
+
+        {mirrors.map((m, i) => {
+          const mx = x(m.position_mm);
+          const bulge = i === 0 ? 9 : -9;   // concave faces point into the cavity
+          return (
+            <g key={m.element}>
+              <path className="mirror"
+                d={`M${mx},${AXIS_Y - HALF - 6} Q${mx + bulge},${AXIS_Y} ${mx},${AXIS_Y + HALF + 6}`} />
+              <text className="chart-note" x={mx} y={AXIS_Y - HALF - 12}
+                textAnchor={i === 0 ? 'start' : 'end'}>{te(m.element)}</text>
+              <text className="chart-note" x={mx} y={H - 8}
+                textAnchor={i === 0 ? 'start' : 'end'}>{m.position_mm} mm</text>
+            </g>
+          );
+        })}
+
+        {crystalFaces.map((f) => (
+          <text key={f.element} className="chart-note" x={x(f.position_mm)} y={H - 8}
+            textAnchor="middle">{f.position_mm}</text>
+        ))}
+      </svg>
+      <p className="muted diagram-caption">
+        {t('caseDetail.physics.layoutScale').replace('{n}', magnification)}
+        {envelope.note ? ` ${envelope.note}` : ''}
+      </p>
+    </div>
+  );
+}
+
+/** Element positions as a drawing plus the exact table, always from one source. */
+export function PlacementBlock({ placement, envelope }) {
+  const { t, te } = useLanguage();
+  if (!placement?.length) return null;
+  return (
+    <div>
+      <h3>{t('caseDetail.physics.placement')}</h3>
+      <CavityLayoutDiagram placement={placement} envelope={envelope} />
+      <table className="mini-table">
+        <tbody>
+          {placement.map((p) => (
+            <tr key={p.element}><td>{te(p.element)}</td><td className="num">{p.position_mm} mm</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function PowerCurveResult({ result, showComparison = true }) {
   const { t } = useLanguage();
   const fit = result.fit;
@@ -113,7 +227,7 @@ export function PowerCurveResult({ result, showComparison = true }) {
 }
 
 export function CavityDesignResult({ result }) {
-  const { t, te } = useLanguage();
+  const { t } = useLanguage();
   const rec = result.recommended || result.analysis;
   // A fixed-length analysis of an UNSTABLE geometry must never read like a
   // recommendation — the student would go build a cavity that cannot lase.
@@ -151,17 +265,8 @@ export function CavityDesignResult({ result }) {
           ['m', rec.stability_m],
         ]} />
       )}
-      {result.placement && !unstable && (
-        <div>
-          <h3>{t('caseDetail.modulesTab.placement')}</h3>
-          <table className="mini-table">
-            <tbody>
-              {result.placement.map((p) => (
-                <tr key={p.element}><td>{te(p.element)}</td><td className="num">{p.position_mm} mm</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {!unstable && (
+        <PlacementBlock placement={result.placement} envelope={result.beam_envelope} />
       )}
       {(result.assumptions || []).length > 0 && (
         <p className="muted">{t('caseDetail.modulesTab.assumptions')}: {result.assumptions.join('；')}</p>
@@ -290,7 +395,7 @@ export function ModuleResult({ moduleType, result, showComparison = true }) {
  * were written by the LLM — the core promise of v2.
  */
 export function PhysicsFactsBlock({ physics }) {
-  const { t, te } = useLanguage();
+  const { t } = useLanguage();
   if (!physics) return null;
 
   if (!physics.available) {
@@ -339,18 +444,7 @@ export function PhysicsFactsBlock({ physics }) {
                   : null],
             ]} />
           )}
-          {rec?.element_placement && (
-            <div>
-              <h3>{t('caseDetail.physics.placement')}</h3>
-              <table className="mini-table">
-                <tbody>
-                  {rec.element_placement.map((p) => (
-                    <tr key={p.element}><td>{te(p.element)}</td><td className="num">{p.position_mm} mm</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <PlacementBlock placement={rec?.element_placement} envelope={rec?.beam_envelope} />
           {(search.alternatives || []).length > 0 && (
             <details>
               <summary className="muted">{t('caseDetail.physics.alternatives')} ({search.alternatives.length})</summary>
@@ -390,15 +484,7 @@ export function PhysicsFactsBlock({ physics }) {
             ['w@M2 (mm)', design.spot_on_mirror2_mm],
             ['w@crystal (mm)', design.spot_in_crystal_mm],
           ]} />
-          {design.element_placement && (
-            <table className="mini-table">
-              <tbody>
-                {design.element_placement.map((p) => (
-                  <tr key={p.element}><td>{te(p.element)}</td><td className="num">{p.position_mm} mm</td></tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <PlacementBlock placement={design.element_placement} envelope={design.beam_envelope} />
         </div>
       )}
 
