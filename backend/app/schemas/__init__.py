@@ -1,6 +1,6 @@
 """Pydantic request and response schemas."""
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -511,6 +511,17 @@ class InventoryItemResponse(BaseModel):
     parse_confidence: Optional[str] = None
     parse_notes: Optional[List[str]] = None
     condition: Optional[str] = None
+    condition_manual: Optional[str] = None
+    condition_note: Optional[str] = None
+    condition_marked_by: Optional[str] = None
+    # `condition` is what the workbook text implied; `effective_condition` is
+    # what a human said if they said anything. Callers should read the latter.
+    effective_condition: Optional[str] = None
+    # Derived per request from open loans, never stored: `quantity` must keep
+    # meaning "what the workbook says the lab owns", because the importer
+    # overwrites it on every re-import.
+    on_loan_qty: Optional[float] = None
+    available_qty: Optional[float] = None
     coatings: List[CoatingSpecResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
@@ -531,6 +542,27 @@ class SurfaceRequirement(BaseModel):
     wavelength_nm: float = Field(..., gt=100, lt=5000)
     function: str = Field(..., pattern="^(?i)(HR|AR|HT|PR)$")
     min_R_pct: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class InventoryBorrowRequest(BaseModel):
+    # Required because local mode has no login: without a typed name, "who has
+    # it" would be permanently blank, which is the one question this feature exists to answer.
+    borrower_name: str = Field(min_length=1, max_length=255)
+    quantity: float = Field(default=1, gt=0)
+    purpose: Optional[str] = None
+    expected_return_at: Optional[datetime] = None
+
+
+class InventoryReturnRequest(BaseModel):
+    note: Optional[str] = None
+    # Returning it is when you discover it is chipped.
+    condition_on_return: Optional[Literal["ok", "damaged", "uncertain"]] = None
+
+
+class InventoryConditionRequest(BaseModel):
+    # None clears the human verdict and falls back to the parsed condition.
+    condition: Optional[Literal["ok", "damaged", "uncertain"]] = None
+    note: Optional[str] = None
 
 
 class ComponentMatchRequest(BaseModel):

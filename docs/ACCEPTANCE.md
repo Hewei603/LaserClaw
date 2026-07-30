@@ -6,11 +6,12 @@ This file tracks the concrete evidence required before LaserClaw can be called e
 
 | Gate | Command / Evidence | Current Status |
 |---|---|---|
-| Backend regression tests | `cd backend; py -m pytest tests -q` | Passed: `161 passed, 2 skipped` |
+| Backend regression tests | `cd backend; py -m pytest tests -q` | Passed: `317 passed, 2 skipped` |
 | Backend lint | `py -m ruff check backend` | Passed |
 | Frontend lint | `cd frontend; npm run lint` | Passed |
 | Frontend production build | `cd frontend; npm run build` | Passed |
-| SQLite migration from empty DB | `DATABASE_URL=sqlite:///./_tmp_migration_check.db py -m alembic upgrade head` | Passed |
+| SQLite migration from empty DB | `DATABASE_URL=sqlite:///./_tmp_migration_check.db py -m alembic upgrade head` | Passed: chain reaches `20260730_0009` |
+| Upgrade of an existing `create_all` database | `tests/test_schema_upgrade.py` | Passed: every model column and index restored on an aged DB, pre-existing rows preserved; NOT NULL columns reported rather than faked |
 | Script syntax | `py -m py_compile backend/scripts/*.py` for eval/import scripts | Passed |
 | API auth dependency audit | `cd backend; py scripts\audit_endpoint_acl.py --fail-on-findings` | Passed: all `/api/*` routes require a principal dependency |
 | Synthetic retrieval backend benchmark | `cd backend; py scripts\benchmark_retrieval_backends.py --backends sql_json,chroma --repeats 10 --top-k 5` | Available; produces `docs/benchmarks/latest_retrieval_backends.json` |

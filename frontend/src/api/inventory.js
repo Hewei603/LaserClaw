@@ -35,4 +35,24 @@ export const inventoryApi = {
     const response = await apiClient.delete('/api/inventory/items', { params });
     return response.data;
   },
+
+  borrow: async (itemId, payload) => {
+    const response = await apiClient.post(`/api/inventory/items/${itemId}/borrow`, payload);
+    return response.data;
+  },
+
+  returnLoan: async (loanId, payload = {}) => {
+    const response = await apiClient.post(`/api/inventory/loans/${loanId}/return`, payload);
+    return response.data;
+  },
+
+  listLoans: async ({ openOnly = true } = {}) => {
+    const response = await apiClient.get('/api/inventory/loans', { params: { open_only: openOnly } });
+    return response.data;
+  },
+
+  setCondition: async (itemId, payload) => {
+    const response = await apiClient.patch(`/api/inventory/items/${itemId}/condition`, payload);
+    return response.data;
+  },
 };
