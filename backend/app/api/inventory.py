@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth.acl import can_manage_knowledge
@@ -15,12 +16,15 @@ from ..config import get_settings
 from ..database import get_db
 from ..inventory.evaluator import evaluate_candidates
 from ..inventory.importer import import_workbook
-from ..models import CoatingSpec, InventoryItem
+from ..models import CoatingSpec, InventoryItem, InventoryLoan
 from ..observability.audit import record_audit
 from ..schemas import (
     ComponentMatchRequest,
+    InventoryBorrowRequest,
+    InventoryConditionRequest,
     InventoryImportResponse,
     InventoryItemResponse,
+    InventoryReturnRequest,
 )
 
 router = APIRouter()
@@ -56,8 +60,29 @@ async def import_inventory(
     stored.write_bytes(content)
 
     source_name = os.path.basename(file.filename or "inventory.xlsx")
+
+    # Re-importing replaces this batch's rows, which retires their ids — and
+    # SQLite reuses rowids, so an open loan would silently re-point at whatever
+    # component happens to take the freed id. Refuse instead of corrupting.
+    outstanding = (
+        db.query(InventoryLoan)
+        .join(InventoryItem, InventoryLoan.item_id == InventoryItem.id)
+        .filter(InventoryItem.source_file == source_name, InventoryLoan.returned_at.is_(None))
+        .count()
+    )
+    if outstanding:
+        stored.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(f"该清单还有 {outstanding} 件元件借出未归还,重新导入会让借用记录对不上元件。"
+                    f"请先归还这些元件,或在「导入批次」里删除该批次后再导入。"),
+        )
+
     try:
-        db.query(InventoryItem).filter(InventoryItem.source_file == source_name).delete()
+        # Row-by-row so the CoatingSpec/InventoryLoan cascades actually run; a
+        # bulk delete bypasses the ORM and orphans the child rows.
+        for stale in db.query(InventoryItem).filter(InventoryItem.source_file == source_name).all():
+            db.delete(stale)
         report = import_workbook(db, stored, source_file=source_name)
     except RuntimeError as exc:
         stored.unlink(missing_ok=True)
@@ -137,18 +162,189 @@ async def list_sources(
     return [{"source_file": name or "(未记录)", "items": count} for name, count in rows]
 
 
+def _loan_payload(loan: InventoryLoan, item: InventoryItem | None) -> dict:
+    return {
+        "id": loan.id,
+        "item_id": loan.item_id,
+        "item_name": item.name if item else None,
+        "borrower_name": loan.borrower_name,
+        "quantity": loan.quantity,
+        "purpose": loan.purpose,
+        "borrowed_at": loan.borrowed_at,
+        "expected_return_at": loan.expected_return_at,
+        "returned_at": loan.returned_at,
+        "returned_note": loan.returned_note,
+        "is_open": loan.returned_at is None,
+    }
+
+
+def _open_loan_totals(db: Session, item_ids: list[int] | None = None) -> dict[int, float]:
+    """How much of each item is signed out right now, keyed by item id."""
+    query = (
+        db.query(InventoryLoan.item_id, func.coalesce(func.sum(InventoryLoan.quantity), 0.0))
+        .filter(InventoryLoan.returned_at.is_(None))
+    )
+    if item_ids is not None:
+        query = query.filter(InventoryLoan.item_id.in_(item_ids))
+    return {item_id: float(total) for item_id, total in query.group_by(InventoryLoan.item_id).all()}
+
+
+@router.post("/items/{item_id}/borrow")
+async def borrow_item(
+    item_id: int,
+    payload: InventoryBorrowRequest,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Sign an item out. Anyone may borrow — reviewer rights are for curation."""
+    item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"元件 {item_id} 不存在")
+
+    if item.effective_condition == "damaged":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="该元件已标记为损坏,不能借出。如需送修请先撤销损坏标记。")
+
+    # Read the availability inside the same transaction that writes the loan, so
+    # two people cannot both be told the last one is free.
+    already_out = _open_loan_totals(db, [item_id]).get(item_id, 0.0)
+    available = float(item.quantity or 0) - already_out
+    if payload.quantity > available:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(f"可用数量不足:库存 {float(item.quantity or 0):g},已借出 {already_out:g},"
+                    f"可借 {max(available, 0):g},本次申请 {payload.quantity:g}。"),
+        )
+
+    loan = InventoryLoan(
+        item_id=item_id,
+        borrower_name=payload.borrower_name.strip(),
+        borrower_user_id=principal.user_id,
+        quantity=payload.quantity,
+        purpose=payload.purpose,
+        expected_return_at=payload.expected_return_at,
+    )
+    db.add(loan)
+    db.flush()
+    record_audit(db, action="inventory.borrow", resource_type="inventory_loan",
+                 resource_id=str(loan.id), actor=principal.actor, user_id=principal.user_id,
+                 metadata={"item_id": item_id, "quantity": payload.quantity,
+                           "borrower": loan.borrower_name})
+    db.commit()
+    db.refresh(loan)
+    return _loan_payload(loan, item)
+
+
+@router.post("/loans/{loan_id}/return")
+async def return_loan(
+    loan_id: int,
+    payload: InventoryReturnRequest = InventoryReturnRequest(),
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Return a borrowed item. The row is kept, not deleted — that is the history."""
+    loan = db.query(InventoryLoan).filter(InventoryLoan.id == loan_id).first()
+    if loan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"借用记录 {loan_id} 不存在")
+    if loan.returned_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该借用记录已经归还过了。")
+
+    loan.returned_at = datetime.now(timezone.utc)
+    loan.returned_note = payload.note
+
+    item = db.query(InventoryItem).filter(InventoryItem.id == loan.item_id).first()
+    # Returning something broken is the moment a person actually knows it is
+    # broken, so this is the natural place to record it.
+    if payload.condition_on_return and item is not None:
+        item.condition_manual = payload.condition_on_return
+        item.condition_note = payload.note
+        item.condition_marked_by = principal.actor
+        item.condition_marked_at = datetime.now(timezone.utc)
+
+    record_audit(db, action="inventory.return", resource_type="inventory_loan",
+                 resource_id=str(loan.id), actor=principal.actor, user_id=principal.user_id,
+                 metadata={"item_id": loan.item_id, "condition_on_return": payload.condition_on_return})
+    db.commit()
+    db.refresh(loan)
+    return _loan_payload(loan, item)
+
+
+@router.get("/loans")
+async def list_loans(
+    open_only: bool = True,
+    item_id: int | None = None,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Loan records — by default only what is currently out."""
+    _ = principal
+    query = db.query(InventoryLoan).options(selectinload(InventoryLoan.item))
+    if open_only:
+        query = query.filter(InventoryLoan.returned_at.is_(None))
+    if item_id is not None:
+        query = query.filter(InventoryLoan.item_id == item_id)
+    loans = query.order_by(InventoryLoan.borrowed_at.desc()).limit(500).all()
+    return [_loan_payload(loan, loan.item) for loan in loans]
+
+
+@router.patch("/items/{item_id}/condition")
+async def set_item_condition(
+    item_id: int,
+    payload: InventoryConditionRequest,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Mark an item damaged / uncertain / ok, or clear the human verdict.
+
+    Written to ``condition_manual``, which the importer never touches, so a
+    re-import of the workbook cannot resurrect a mirror somebody broke.
+    Clearing it (``condition: null``) needs curation rights: undoing someone
+    else's damage report should not be a one-click accident.
+    """
+    item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"元件 {item_id} 不存在")
+
+    if payload.condition is None and not can_manage_knowledge(principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="撤销损坏标记需要 reviewer 或 admin 权限")
+
+    item.condition_manual = payload.condition
+    item.condition_note = payload.note
+    item.condition_marked_by = principal.actor if payload.condition else None
+    item.condition_marked_at = datetime.now(timezone.utc) if payload.condition else None
+
+    record_audit(db, action="inventory.mark_condition", resource_type="inventory",
+                 resource_id=str(item_id), actor=principal.actor, user_id=principal.user_id,
+                 metadata={"condition": payload.condition, "note": payload.note})
+    db.commit()
+    db.refresh(item)
+    return {"item_id": item.id, "condition": item.condition,
+            "condition_manual": item.condition_manual,
+            "effective_condition": item.effective_condition,
+            "condition_note": item.condition_note,
+            "condition_marked_by": item.condition_marked_by}
+
+
 @router.get("/items", response_model=list[InventoryItemResponse])
 async def list_items(
     category: str | None = None,
     wavelength_nm: float | None = None,
     function: str | None = None,
     needs_review: bool = False,
+    condition: str | None = None,
+    available_only: bool = False,
     limit: int = 100,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
 ):
     """List/filter inventory items.  Wavelength+function filters use the typed
-    coating rows (SQL-level, not text search)."""
+    coating rows (SQL-level, not text search).
+
+    Availability is computed per request from open loans rather than stored: the
+    importer overwrites ``quantity`` on every re-import, so anything bookkept
+    there would be silently reverted.
+    """
     _ = principal
     query = db.query(InventoryItem).options(selectinload(InventoryItem.coatings))
     if category:
@@ -166,7 +362,22 @@ async def list_items(
                 query = query.filter(or_(CoatingSpec.function == "AR", CoatingSpec.function == "HT"))
             else:
                 query = query.filter(CoatingSpec.function == fn)
-    return query.distinct().limit(min(limit, 500)).all()
+    items = query.distinct().limit(min(limit, 500)).all()
+
+    loans = _open_loan_totals(db, [item.id for item in items]) if items else {}
+    enriched = []
+    for item in items:
+        on_loan = loans.get(item.id, 0.0)
+        # Attached to the instance so the from_attributes response model picks
+        # them up without a second, hand-built serialisation path.
+        item.on_loan_qty = on_loan
+        item.available_qty = float(item.quantity or 0) - on_loan
+        if condition and item.effective_condition != condition:
+            continue
+        if available_only and item.available_qty <= 0:
+            continue
+        enriched.append(item)
+    return enriched
 
 
 @router.post("/match")

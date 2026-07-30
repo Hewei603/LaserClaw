@@ -113,6 +113,11 @@ class Element:
     name: str
     M: np.ndarray
     n_after: float = 1.0  # refractive index of the medium *following* this element
+    # Physical length this element spans along the axis (0 for thin elements:
+    # interfaces, mirrors, lenses).  The matrix alone cannot supply this — a
+    # slab's B entry is the *reduced* length and a lens has B = 0 — so anything
+    # that needs a physical z axis (a drawing, an envelope) reads it from here.
+    length_mm: float = 0.0
 
 
 # --------------------------------------------------------------------------

@@ -15,7 +15,14 @@ import json
 from typing import Any
 
 from .design import design_linear_cavity
-from .toolkit import _placement, run_cavity_design, run_coating_tmm, run_phase_match
+from .toolkit import (
+    _FLAT_ROC_MM,
+    _placement,
+    beam_envelope,
+    run_cavity_design,
+    run_coating_tmm,
+    run_phase_match,
+)
 
 # Parameter aliases accepted from a case, mapped to the toolkit's names.
 _CAVITY_KEYS = ("R1_mm", "R2_mm", "L_mm", "L_scan_mm", "target_waist_mm", "crystal", "wavelength_nm")
@@ -89,6 +96,21 @@ def _coating_configs(params: dict) -> list[dict]:
 def _placement_from(candidate: dict) -> list:
     """Element positions (mm from M1) for a searched candidate geometry."""
     return _placement(candidate["length_mm"], candidate.get("crystal"))
+
+
+def _envelope_from(candidate: dict, wavelength_nm: float) -> dict:
+    """Cold-cavity w(z) samples for a searched geometry, so the plan can be drawn.
+
+    A searched candidate stores mirror radii as ``None`` for flat; the analysis
+    helpers want the numerically-flat sentinel instead.
+    """
+    return beam_envelope(
+        candidate["length_mm"],
+        candidate["R1_mm"] if candidate.get("R1_mm") is not None else _FLAT_ROC_MM,
+        candidate["R2_mm"] if candidate.get("R2_mm") is not None else _FLAT_ROC_MM,
+        wavelength_nm,
+        candidate.get("crystal"),
+    )
 
 
 def compute_case_physics(
@@ -183,6 +205,7 @@ def compute_case_physics(
                     "thermal_lens_tolerance_min_f_mm": best.get("thermal_lens_tolerance_min_f_mm"),
                     "score_breakdown": best.get("score_breakdown"),
                     "element_placement": _placement_from(best),
+                    "beam_envelope": _safe("beam_envelope", lambda c: _envelope_from(c, wl), best),
                 },
                 "alternatives": [
                     {"R1": c["R1_label"], "R2": c["R2_label"], "length_mm": c["length_mm"],
@@ -208,6 +231,7 @@ def compute_case_physics(
                 "spot_in_crystal_mm": rec.get("w_in_crystal_mm"),
                 "stability_m": rec.get("stability_m"),
                 "element_placement": out.get("placement"),
+                "beam_envelope": out.get("beam_envelope"),
             }
             tools.append("cavity_design")
 
