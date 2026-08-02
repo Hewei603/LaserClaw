@@ -14,7 +14,8 @@ from ..auth.security import Principal, get_current_principal
 from ..database import get_db
 from ..knowledge.ingestion import create_generated_content_source
 from ..knowledge.retrieval import results_to_citations, search_case_and_global_knowledge
-from ..models import ExperimentCase, GeneratedContent, InventoryItem, PromptVersion
+from ..inventory.evaluator import available_mirror_rocs
+from ..models import ExperimentCase, GeneratedContent, PromptVersion
 from ..observability.audit import record_audit
 from ..observability.usage import apply_usage_to_generated
 from ..physics.case_context import compute_case_physics
@@ -30,30 +31,6 @@ def _get_case_or_404(case_id: int, db: Session) -> ExperimentCase:
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Case {case_id} does not exist")
     return case
-
-
-def _inventory_rocs(db: Session) -> list | None:
-    """Mirror radii the lab actually owns, for the cavity design search.
-
-    A design built from mirrors nobody has is useless, so when the inventory has
-    been imported the search is constrained to real stock (flat mirrors
-    included). Returns None when the inventory is empty, letting the search fall
-    back to a vendor catalogue.
-
-    Mirrors only: a lens surface of radius R has f = R/(n-1), not R/2, so lens
-    radii are not interchangeable cavity mirror radii — and a lens carries no HR
-    coating.
-    """
-    rows = (
-        db.query(InventoryItem.roc_mm, InventoryItem.roc_is_flat)
-        .filter(InventoryItem.category == "mirror", InventoryItem.condition != "damaged")
-        .distinct()
-        .all()
-    )
-    rocs: list = sorted({float(r) for r, flat in rows if r and not flat})
-    if any(flat for _, flat in rows):
-        rocs.append("flat")
-    return rocs or None
 
 
 def _full_case_data(case: ExperimentCase, *, physics: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -160,7 +137,7 @@ async def generate_plan(
     provider = get_ai_provider()
     # The cavity search is unbounded, user-controlled CPU work: compute it ONCE
     # and off the event loop so one case cannot stall the whole server.
-    rocs = _inventory_rocs(db)
+    rocs = available_mirror_rocs(db)
     physics = await asyncio.to_thread(compute_case_physics, case.parameters, available_rocs=rocs)
     content, latency_ms = await _run_generation(
         "plan", provider.generate_plan(_full_case_data(case, physics=physics))

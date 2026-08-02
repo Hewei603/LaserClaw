@@ -47,10 +47,15 @@ def _add_column_ddl(bind, table, column) -> str | None:
         ddl = f"ALTER TABLE {table.name} ADD COLUMN {bare}"
         with bind.begin() as conn:
             conn.execute(text(ddl))
+        # No "run alembic" advice here: a create_all-managed database has no
+        # alembic_version stamp, so `alembic upgrade head` would replay 0001
+        # and die on the first existing table — a dead end for the launcher
+        # user this path serves.
         logger.warning(
             "%s.%s was added without its default (this database does not allow "
-            "one in ALTER TABLE); existing and new rows read NULL there until "
-            "'alembic upgrade head' is run.",
+            "one in ALTER TABLE); existing and new rows read NULL there. "
+            "Harmless for optional columns; if values are needed, back up and "
+            "recreate the database, or manage it with Alembic from the start.",
             table.name, column.name,
         )
         return ddl
@@ -88,10 +93,14 @@ def sync_additive_schema(bind=None) -> list[str]:
                 continue
             if not column.nullable and column.default is None and column.server_default is None:
                 # SQLite cannot add a NOT NULL column without a default, and
-                # guessing a value would fabricate data. Say so instead.
+                # guessing a value would fabricate data. Say so instead — and
+                # do NOT say "run alembic": a create_all database has no
+                # alembic_version stamp, so upgrading from 0001 would fail on
+                # the first already-existing table.
                 logger.warning(
                     "%s.%s is NOT NULL with no default and cannot be added "
-                    "automatically; run 'alembic upgrade head'.",
+                    "automatically. Back up the database file and let the app "
+                    "recreate it, or restore from an Alembic-managed copy.",
                     table.name, column.name,
                 )
                 continue

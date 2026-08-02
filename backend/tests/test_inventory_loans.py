@@ -184,15 +184,59 @@ def test_reimport_is_refused_while_items_are_out(client, session):
     assert "未归还" in resp.json()["detail"]
 
 
-def test_deleting_a_batch_takes_its_loans_with_it(client, session):
-    """No orphan loan rows pointing at deleted items."""
+def test_deleting_a_batch_with_open_loans_is_refused(client, session):
+    """The re-import 409 must not have a one-click escape hatch that erases
+    the very ledger it protects: deleting the batch cascades open loans away,
+    and after the next import the borrowed mirror would list as available."""
     item_id = _seed(session, source="stock.xlsx")
     _borrow(client, item_id)
 
     resp = client.delete("/api/inventory/items", params={"source_file": "stock.xlsx"},
                          headers=REVIEWER)
+    assert resp.status_code == 409
+    assert "未归还" in resp.json()["detail"]
+    assert session.query(InventoryLoan).filter(InventoryLoan.item_id == item_id).count() == 1
+
+
+def test_deleting_a_batch_takes_its_returned_loans_with_it(client, session):
+    """Once nothing is outstanding, delete works and leaves no orphan loan rows
+    pointing at retired item ids."""
+    item_id = _seed(session, source="stock.xlsx")
+    loan_id = _borrow(client, item_id).json()["id"]
+    client.post(f"/api/inventory/loans/{loan_id}/return", json={})
+
+    resp = client.delete("/api/inventory/items", params={"source_file": "stock.xlsx"},
+                         headers=REVIEWER)
     assert resp.status_code == 200
     assert session.query(InventoryLoan).filter(InventoryLoan.item_id == item_id).count() == 0
+
+
+def test_available_only_filters_before_the_limit(client, session):
+    """The filter must run in SQL, not on the already-limited page.
+
+    Otherwise an available item past row `limit` never appears — the page is
+    filled with borrowed items first and then filtered to nothing.
+    """
+    out1 = _seed(session, name="借光A", qty=1.0)
+    out2 = _seed(session, name="借光B", qty=1.0)
+    free = _seed(session, name="在库C", qty=1.0)
+    _borrow(client, out1)
+    _borrow(client, out2)
+
+    rows = client.get("/api/inventory/items",
+                      params={"available_only": True, "limit": 2}).json()
+    assert [r["id"] for r in rows] == [free], \
+        "filtering after the limit hid the only available item"
+
+
+def test_condition_filter_sees_the_human_verdict(client, session):
+    item_id = _seed(session, condition="ok")
+    _seed(session, name="好的", condition="ok")
+    client.patch(f"/api/inventory/items/{item_id}/condition", json={"condition": "damaged"})
+
+    rows = client.get("/api/inventory/items", params={"condition": "damaged"}).json()
+    assert [r["id"] for r in rows] == [item_id], \
+        "the condition filter must judge coalesce(manual, parsed), not the parsed column"
 
 
 def test_borrow_requires_a_name(client, session):
