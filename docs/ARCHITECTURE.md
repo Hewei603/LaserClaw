@@ -44,10 +44,10 @@ LaserClaw 是一个面向激光实验室的本地优先(local-first)实验管理
 | 库存 | `backend/app/inventory/` | L0 解析/导入 + L1 评估(见 §6) |
 | Provider | `backend/app/providers/` | LLM 抽象:mock / openai / anthropic |
 | 模型 | `backend/app/models/` | SQLAlchemy ORM(见 §8) |
-| 迁移 | `backend/alembic/versions/` | 线性迁移链 0001→0008 |
+| 迁移 | `backend/alembic/versions/` | 线性迁移链 0001→0009 |
 | 观测 | `backend/app/observability/` | 审计日志、token 用量 |
 | 评测 | `backend/app/evals/` | RAG 检索评测指标与验收门 |
-| 测试 | `backend/tests/` | 237+ 用例(见 §9) |
+| 测试 | `backend/tests/` | 300+ 用例(见 §9) |
 | 演示 | `backend/scripts/demo_*.py` | 端到端可复现演示(见 §10) |
 | 前端 | `frontend/src/` | React 页面 + API 客户端 |
 
@@ -133,6 +133,8 @@ oracle(GPL,已 gitignore,绝不拷贝)。
   ORM 属性与 L1 评估器共用同一条规则。
 - 有未归还记录时**拒绝**重新导入同一来源文件(409)。重新导入会作废旧 item id,而 SQLite 会复用 rowid,
   未归还记录将悄悄指向另一件元件——这是无法事后发现的数据损坏,只能拒绝。
+  **删除批次同样被拒**(级联会连借用账目一起抹掉,元件在下次导入后显示满额可借)——两道门一致,
+  唯一出路是先归还。
 - 归还不删记录(`returned_at` 置位)。"上次坏掉时是谁在用"正是实验室会问的问题,删掉就答不出来了。
 - L1 评估器读的是**可用量与人工状态**:借光的、标损坏的元件不会出现在匹配结果里
   (淘汰理由显式给出:`元件标注损坏` / `可用数量不足(...已借出 N)`)。
@@ -220,7 +222,7 @@ Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `a
 
 ---
 
-## 9. 测试与质量门(`backend/tests/`,共 267 用例 + 2 skipped)
+## 9. 测试与质量门(`backend/tests/`,共 323 用例,321 passed + 2 skipped)
 
 | 文件 | 覆盖 |
 |---|---|

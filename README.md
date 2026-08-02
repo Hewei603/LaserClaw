@@ -121,12 +121,12 @@ works end to end; they are **not** a claim about production-scale accuracy.
 
 | Check | Result | Reproduce with |
 |---|---|---|
-| Backend test suite | 317 passed, 2 skipped | `cd backend && py -m pytest -q` |
+| Backend test suite | 321 passed, 2 skipped | `cd backend && py -m pytest -q` |
 | Physics kernel vs analytic/literature | included above (TMM cross-checked against the independent `tmm` package to machine precision) | `py -m pytest tests/test_physics_*.py -q` |
 | Intent-routing cases | 57 passed | `py -m pytest tests/test_router.py -q` |
 | RAG dataset assertions | 8 passed (37-query dataset) | `py -m pytest tests/eval_rag_dataset.py -q` |
 | Agent trace completeness | 7 passed | `py -m pytest tests/eval_agent_trace.py -q` |
-| API auth dependency audit | 74 `/api/*` routes checked, 0 findings | `py scripts/audit_endpoint_acl.py` |
+| API auth dependency audit | 78 `/api/*` routes checked, 0 findings | `py scripts/audit_endpoint_acl.py` |
 | Frontend lint/build | Passed | `cd frontend && npm run lint && npm run build` |
 
 Retrieval quality and latency on the synthetic corpus
