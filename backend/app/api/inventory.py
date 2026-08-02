@@ -72,10 +72,13 @@ async def import_inventory(
     )
     if outstanding:
         stored.unlink(missing_ok=True)
+        # Deliberately the ONLY way out: returning the items. Deleting the
+        # batch would cascade the open loans away — exactly the ledger this
+        # guard exists to protect — so it must not be offered as an escape.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(f"该清单还有 {outstanding} 件元件借出未归还,重新导入会让借用记录对不上元件。"
-                    f"请先归还这些元件,或在「导入批次」里删除该批次后再导入。"),
+                    f"请先在元件表里逐件点「归还」,再重新导入。"),
         )
 
     try:
@@ -125,6 +128,20 @@ async def clear_inventory(
     """
     if not can_manage_knowledge(principal):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要 reviewer 或 admin 权限")
+    # Same guard as re-import, for the same reason: deleting items cascades
+    # their loans away, so a batch with something still in someone's drawer
+    # would silently erase "who has it" and the item would list as available
+    # again after the next import. Return first, then delete.
+    open_loans = db.query(InventoryLoan).join(InventoryItem, InventoryLoan.item_id == InventoryItem.id)
+    if source_file:
+        open_loans = open_loans.filter(InventoryItem.source_file == source_file)
+    outstanding = open_loans.filter(InventoryLoan.returned_at.is_(None)).count()
+    if outstanding:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(f"该批次还有 {outstanding} 件元件借出未归还,删除会连借用记录一起抹掉。"
+                    f"请先在元件表里逐件点「归还」,再删除批次。"),
+        )
     query = db.query(InventoryItem)
     if source_file:
         query = query.filter(InventoryItem.source_file == source_file)
@@ -197,7 +214,17 @@ async def borrow_item(
     principal: Principal = Depends(get_current_principal),
 ):
     """Sign an item out. Anyone may borrow — reviewer rights are for curation."""
-    item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
+    # Lock the item row for the duration of the check-then-write, so two
+    # concurrent borrows cannot both be told the last one is free. READ
+    # COMMITTED alone does not give that: both transactions would pass the
+    # availability check and both commit. On Postgres this emits FOR UPDATE;
+    # SQLite ignores it, but its single-writer lock serialises anyway.
+    item = (
+        db.query(InventoryItem)
+        .filter(InventoryItem.id == item_id)
+        .with_for_update()
+        .first()
+    )
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"元件 {item_id} 不存在")
 
@@ -205,8 +232,6 @@ async def borrow_item(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="该元件已标记为损坏,不能借出。如需送修请先撤销损坏标记。")
 
-    # Read the availability inside the same transaction that writes the loan, so
-    # two people cannot both be told the last one is free.
     already_out = _open_loan_totals(db, [item_id]).get(item_id, 0.0)
     available = float(item.quantity or 0) - already_out
     if payload.quantity > available:
@@ -362,22 +387,37 @@ async def list_items(
                 query = query.filter(or_(CoatingSpec.function == "AR", CoatingSpec.function == "HT"))
             else:
                 query = query.filter(CoatingSpec.function == fn)
+    # Both filters run in SQL, BEFORE the limit. Filtering the limited page in
+    # Python silently drops every match past row `limit` — with a real workbook
+    # (hundreds of rows) a damaged mirror at row 501 would simply never appear.
+    if condition:
+        query = query.filter(
+            func.coalesce(InventoryItem.condition_manual, InventoryItem.condition, "ok") == condition
+        )
+    open_loan_sums = (
+        db.query(
+            InventoryLoan.item_id.label("loan_item_id"),
+            func.coalesce(func.sum(InventoryLoan.quantity), 0.0).label("loaned"),
+        )
+        .filter(InventoryLoan.returned_at.is_(None))
+        .group_by(InventoryLoan.item_id)
+        .subquery()
+    )
+    if available_only:
+        query = (
+            query.outerjoin(open_loan_sums, open_loan_sums.c.loan_item_id == InventoryItem.id)
+            .filter(func.coalesce(InventoryItem.quantity, 0) - func.coalesce(open_loan_sums.c.loaned, 0) > 0)
+        )
     items = query.distinct().limit(min(limit, 500)).all()
 
     loans = _open_loan_totals(db, [item.id for item in items]) if items else {}
-    enriched = []
     for item in items:
         on_loan = loans.get(item.id, 0.0)
         # Attached to the instance so the from_attributes response model picks
         # them up without a second, hand-built serialisation path.
         item.on_loan_qty = on_loan
         item.available_qty = float(item.quantity or 0) - on_loan
-        if condition and item.effective_condition != condition:
-            continue
-        if available_only and item.available_qty <= 0:
-            continue
-        enriched.append(item)
-    return enriched
+    return items
 
 
 @router.post("/match")

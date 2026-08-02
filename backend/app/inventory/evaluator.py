@@ -33,6 +33,38 @@ from ..physics.materials import n_real
 _TRANSMIT = {"AR", "HT"}
 _REFLECT = {"HR"}
 
+
+def available_mirror_rocs(db: Session) -> list | None:
+    """Mirror radii the lab actually owns, for the cavity design search.
+
+    A design built from mirrors nobody has is useless, so when the inventory has
+    been imported the search is constrained to real stock (flat mirrors
+    included). Returns None when the inventory is empty, letting the search fall
+    back to a vendor catalogue.
+
+    Mirrors only: a lens surface of radius R has f = R/(n-1), not R/2, so lens
+    radii are not interchangeable cavity mirror radii — and a lens carries no HR
+    coating.
+
+    Condition is judged like everywhere else — human verdict first
+    (:func:`app.models.inventory.resolve_condition`): a mirror someone marked
+    broken must not seed a recommended geometry that component matching will
+    then reject, and one the workbook called broken but a human cleared must.
+    """
+    rows = (
+        db.query(InventoryItem.roc_mm, InventoryItem.roc_is_flat)
+        .filter(
+            InventoryItem.category == "mirror",
+            func.coalesce(InventoryItem.condition_manual, InventoryItem.condition, "ok") != "damaged",
+        )
+        .distinct()
+        .all()
+    )
+    rocs: list = sorted({float(r) for r, flat in rows if r and not flat})
+    if any(flat for _, flat in rows):
+        rocs.append("flat")
+    return rocs or None
+
 # Representative quarter-wave indices for the stopband prior (same defaults as
 # the coating tool's archetype mode).
 _N_HIGH = None
