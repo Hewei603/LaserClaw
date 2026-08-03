@@ -854,7 +854,7 @@ async def export_procurement_csv(
         ])
     # UTF-8 BOM: without it Excel decodes the Chinese cells as GBK mojibake.
     return Response(
-        content="﻿" + buffer.getvalue(),
+        content="\ufeff" + buffer.getvalue(),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="case-{case_id}-procurement.csv"'},
     )
@@ -900,7 +900,7 @@ async def export_bom_csv(
             item.notes,
         ])
     return Response(
-        content="﻿" + buffer.getvalue(),
+        content="\ufeff" + buffer.getvalue(),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="case-{case_id}-bom.csv"'},
     )

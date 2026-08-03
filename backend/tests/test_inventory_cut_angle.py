@@ -131,6 +131,43 @@ def test_retunable_does_not_dominate_exact_cut(db):
     assert other["frontier"] is False  # dominated: worse cut status and deviation
 
 
+def test_assumed_material_never_reaches_design_match(db):
+    # A crystal whose material cannot be identified, matched under an explicit
+    # crystal=lbo restriction, gets judged against ASSUMED-material physics.
+    # Even a perfect angular agreement must stay "maybe_usable + confirm the
+    # material" — a label-less crystal never "matches by design".
+    _seed(db, _crystal("倍频晶体(未知材料)", theta=90.0, phi=11.4))
+    out = _match(db, lambda1_nm=1064, pm_type="I", crystal="lbo")
+    assert out["eligible_count"] == 1
+    v = out["candidates"][0]
+    cut = v["parameters"]["cut_angle"]
+    assert cut["status"] == "maybe_usable"
+    assert cut.get("material_assumed") is True
+    assert "确认材料" in cut["detail"]
+    assert any("确认材料" in m or "假定" in m for m in v["must_measure"])
+
+
+def test_assumed_material_mismatch_is_not_a_veto(db):
+    # Same unidentified crystal with an angle far from the LBO solution: the
+    # physics was computed for an ASSUMED material, so this is "unknown, go
+    # confirm", never a confident hard rejection.
+    _seed(db, _crystal("倍频晶体(未知材料)", theta=90.0, phi=38.2))
+    out = _match(db, lambda1_nm=1064, pm_type="I", crystal="lbo")
+    assert out["eligible_count"] == 1
+    assert out["candidates"][0]["parameters"]["cut_angle"]["status"] == "unknown"
+
+
+def test_missing_lambda1_degrades_instead_of_500(db):
+    # The case-module path merges raw case parameters into the requirement
+    # without pydantic; a phase_match dict missing lambda1_nm must not KeyError.
+    _seed(db, _crystal("LBO倍频晶体", theta=90.0, phi=11.4))
+    out = evaluate_candidates(db, {"role": "shg", "phase_match": {"pm_type": "I"}})
+    assert out["eligible_count"] == 1
+    cut = out["candidates"][0]["parameters"]["cut_angle"]
+    assert cut["status"] == "unknown"
+    assert "lambda1_nm" in cut["detail"]
+
+
 def test_match_api_round_trip(client):
     # Through the REST schema: nested phase_match survives validation.
     resp = client.post("/api/inventory/match", json={

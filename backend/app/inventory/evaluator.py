@@ -298,6 +298,12 @@ def _judge_cut_angle(item, pm_req: dict) -> dict:
     label: even a design_match keeps ``needs_measurement`` when one angular
     dimension is unlabelled, and retunable cuts always go to the measure list.
     """
+    if pm_req.get("lambda1_nm") is None:
+        # The module path merges case parameters straight into the requirement
+        # without pydantic; a malformed phase_match must degrade, not 500.
+        return {"status": "unknown", "material": None, "needs_measurement": True,
+                "detail": "phase_match 缺少基频波长 lambda1_nm,无法计算相位匹配角"}
+
     text = (f"{item.name or ''} {getattr(item, 'material', '') or ''} "
             f"{getattr(item, 'raw_spec', '') or ''}").upper()
     non_pm = next((m for m in _NON_PM_MATERIALS if m in text), None)
@@ -309,6 +315,11 @@ def _judge_cut_angle(item, pm_req: dict) -> dict:
     if want and material and material != want:
         return {"status": "material_mismatch", "material": material,
                 "detail": f"晶体材料 {material.upper()} ≠ 需求 {want.upper()}"}
+    # Requirement-restricted match with an unidentifiable item: we may CHECK it
+    # against the requested material's angles, but the physics is then computed
+    # for an ASSUMED material — every conclusion below must say so, none may
+    # claim design_match, and a mismatch must not read as a definitive veto.
+    assumed = material is None and want is not None
     material = material or want
     if material is None:
         return {"status": "unknown", "material": None, "needs_measurement": True,
@@ -360,14 +371,30 @@ def _judge_cut_angle(item, pm_req: dict) -> dict:
                     "unchecked": unchecked,
                 }
 
+    def _finish(result: dict) -> dict:
+        """Apply the assumed-material honesty rules to a would-be verdict."""
+        if not assumed:
+            return result
+        note = f"材料未从标签识别,按需求假定为 {material.upper()} 计算——需先人工确认材料"
+        result["material_assumed"] = True
+        result["needs_measurement"] = True
+        if result["status"] == "design_match":
+            result["status"] = "maybe_usable"       # a label-less crystal never "matches by design"
+        elif result["status"] == "off":
+            # Rejecting an unidentified crystal on ASSUMED-material physics
+            # would be a fake certainty; keep it as a to-verify item instead.
+            result["status"] = "unknown"
+        result["detail"] = f"{note}; {result['detail']}"
+        return result
+
     lam_txt = f"{pm_req['lambda1_nm']:g}nm" + (
         f"+{pm_req['lambda2_nm']:g}nm" if pm_req.get("lambda2_nm") else " SHG")
     if best is None:
         if not any_solution:
-            return {"status": "off", "material": material,
-                    "detail": f"{material.upper()} 在 {lam_txt} 无角度相位匹配解(或不支持该配置)"}
-        return {"status": "unknown", "material": material, "needs_measurement": True,
-                "detail": "标签切角与所需匹配面的角度维度对不上(如只标了 φ 而解在 θ 面),需人工核对"}
+            return _finish({"status": "off", "material": material,
+                            "detail": f"{material.upper()} 在 {lam_txt} 无角度相位匹配解(或不支持该配置)"})
+        return _finish({"status": "unknown", "material": material, "needs_measurement": True,
+                        "detail": "标签切角与所需匹配面的角度维度对不上(如只标了 φ 而解在 θ 面),需人工核对"})
 
     req = best["required"]
     req_txt = (f"{material.upper()} {req['plane'] or '单轴'}面 {req['pm_type']}类需 "
@@ -381,12 +408,12 @@ def _judge_cut_angle(item, pm_req: dict) -> dict:
     tol_match = float(pm_req.get("tol_match_deg", 1.0))
     tol_retune = float(pm_req.get("tol_retune_deg", 5.0))
     if best["deviation_deg"] <= tol_match:
-        return {"status": "design_match", "detail": detail,
-                "needs_measurement": bool(best["unchecked"]), **best}
+        return _finish({"status": "design_match", "detail": detail,
+                        "needs_measurement": bool(best["unchecked"]), **best})
     if best["deviation_deg"] <= tol_retune:
-        return {"status": "maybe_usable", "needs_measurement": True,
-                "detail": detail + ",小角度重调可能可行,需实测转换效率与镀膜失谐", **best}
-    return {"status": "off", "detail": detail + ",切角偏差过大", **best}
+        return _finish({"status": "maybe_usable", "needs_measurement": True,
+                        "detail": detail + ",小角度重调可能可行,需实测转换效率与镀膜失谐", **best})
+    return _finish({"status": "off", "detail": detail + ",切角偏差过大", **best})
 
 
 def evaluate_item(item: InventoryItem, requirement: dict, loaned_qty: float = 0.0) -> dict:
