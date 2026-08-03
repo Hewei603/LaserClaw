@@ -100,6 +100,22 @@ def _build_item(
     else:
         confidence = "parsed"
 
+    # A geometry cell with content that produced NO structured field is silent
+    # data loss: the evaluator would call the ROC "unknown" and send the student
+    # to measure a number the workbook already states. Regex coverage will never
+    # be complete, so the failure must at least be visible in the review queue.
+    geometry_text = " ".join(c for c in geometry_cells if c).strip()
+    geo_extracted = any([
+        geo.roc_mm is not None, geo.roc_is_flat, geo.focal_length_mm is not None,
+        geo.diameter_mm is not None, geo.thickness_mm is not None, geo.dimensions,
+        geo.cut_angle_theta_deg is not None, geo.cut_angle_phi_deg is not None,
+        geo.cut_axis, geo.doping_pct is not None,
+    ])
+    if geometry_text and not geo_extracted:
+        notes.append(f"几何列未解析: {geometry_text[:60]}")
+        if confidence == "parsed":
+            confidence = "partial"
+
     condition = "ok"
     if any(marker in notes for marker in DAMAGE_MARKERS):
         condition = "damaged"
@@ -114,6 +130,7 @@ def _build_item(
         diameter_mm=geo.diameter_mm,
         roc_mm=geo.roc_mm,
         roc_is_flat=geo.roc_is_flat,
+        focal_length_mm=geo.focal_length_mm,
         thickness_mm=geo.thickness_mm,
         dimensions=geo.dimensions,
         cut_angle_theta_deg=geo.cut_angle_theta_deg,

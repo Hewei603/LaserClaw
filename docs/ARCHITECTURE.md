@@ -281,7 +281,10 @@ Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `a
 
 - **物理内核边界(已文档化)**:双轴相位匹配为主平面近似(medium 置信度);TMM 假设无损入射介质;
   含腔内介质时束腰**位置**为光程坐标(尺寸精确);金属镜/GDD 镜/LBO 温度调谐待做。
-- **L1 边界**:镀膜三态依赖标称阻带先验,实测曲线导入(`coating_tool` vendor_curve 模式)可逐件升级置信度;
-  切角匹配目前在演示脚本中示范(BIBO/LBO),尚未并入 evaluator 的晶体判定维度。
+- **L1 边界**:镀膜三态依赖标称阻带先验,实测曲线导入(`coating_tool` vendor_curve 模式)可逐件升级置信度,
+  但实测结果尚未持久化回库存元件(测完不消 must_measure 项——已列为下一步)。
+  晶体切角匹配已并入 evaluator(需求 spec 的 `phase_match` 字段;按各晶体**自身材料**算目标匹配角,
+  与标签切角比对出三态:≤1° design_match / ≤5° 可重调需实测 / 更大硬伤否决;θ 与 180°−θ 等价);
+  元件库页面"非线性晶体(切角)"匹配模式即此路径,回归锚点见 `tests/test_inventory_cut_angle.py`。
 - **L2/L3 方向**:实验室历史先例库(成/败记录)校准 maybe_usable 阈值;LLM 判断层消费 L1 前沿
   (每条结论必须挂在算出的数字或检索到的先例上);整链 propose-verify 耦合搜索。

@@ -22,7 +22,11 @@ function InventoryPage() {
   const [filters, setFilters] = useState({ category: '', wavelengthNm: '', functionName: '' });
   const [nameQuery, setNameQuery] = useState('');
   const [showReview, setShowReview] = useState(false);
-  const [matchForm, setMatchForm] = useState({ wavelength: '1064', functionName: 'HR', roc: '', minD: '', minR: '' });
+  const [matchForm, setMatchForm] = useState({
+    mode: 'coating',                     // coating = 镜片镀膜需求, crystal = 非线性晶体切角需求
+    wavelength: '1064', functionName: 'HR', roc: '', minD: '', minR: '',
+    lambda1: '1064', lambda2: '', pmType: '', crystalMat: '',
+  });
   const [matchResult, setMatchResult] = useState(null);
   const [matching, setMatching] = useState(false);
   const [sources, setSources] = useState([]);
@@ -156,29 +160,54 @@ function InventoryPage() {
     setMatching(true);
     setError(null);
     try {
-      const surface = { wavelength_nm: Number(matchForm.wavelength), function: matchForm.functionName };
-      // A reflectivity floor turns "HR" from a label into a hard判定:
-      // R=85% nominal vs min_R_pct=99.5 → below_spec, exactly as documented.
-      if (matchForm.minR.trim() && !Number.isNaN(Number(matchForm.minR))) {
-        surface.min_R_pct = Number(matchForm.minR);
-      }
-      const requirement = {
-        role: 'ui match',
-        surfaces: [surface],
-      };
-      const rawRoc = matchForm.roc.trim().toLowerCase();
-      if (rawRoc) {
-        if (['flat', '平镜', '平', 'inf', '无限', '平面'].includes(rawRoc)) {
-          requirement.roc_mm = 'flat';
-        } else if (!Number.isNaN(Number(rawRoc))) {
-          requirement.roc_mm = Number(rawRoc);
-        } else {
-          setError(t('inventoryPage.badRoc'));
+      let requirement;
+      if (matchForm.mode === 'crystal') {
+        // Cut-angle requirement: the evaluator computes the phase-match angle
+        // for each crystal's own material and compares it with the label.
+        const l1 = Number(matchForm.lambda1);
+        if (!matchForm.lambda1.trim() || Number.isNaN(l1) || l1 <= 100) {
+          setError(t('inventoryPage.badLambda'));
           setMatching(false);
           return;
         }
+        const pm = { lambda1_nm: l1 };
+        if (matchForm.lambda2.trim()) {
+          const l2 = Number(matchForm.lambda2);
+          if (Number.isNaN(l2) || l2 <= 100) {
+            setError(t('inventoryPage.badLambda'));
+            setMatching(false);
+            return;
+          }
+          pm.lambda2_nm = l2;
+        }
+        if (matchForm.pmType) pm.pm_type = matchForm.pmType;
+        if (matchForm.crystalMat) pm.crystal = matchForm.crystalMat;
+        requirement = { role: 'ui crystal match', phase_match: pm };
+      } else {
+        const surface = { wavelength_nm: Number(matchForm.wavelength), function: matchForm.functionName };
+        // A reflectivity floor turns "HR" from a label into a hard判定:
+        // R=85% nominal vs min_R_pct=99.5 → below_spec, exactly as documented.
+        if (matchForm.minR.trim() && !Number.isNaN(Number(matchForm.minR))) {
+          surface.min_R_pct = Number(matchForm.minR);
+        }
+        requirement = {
+          role: 'ui match',
+          surfaces: [surface],
+        };
+        const rawRoc = matchForm.roc.trim().toLowerCase();
+        if (rawRoc) {
+          if (['flat', '平镜', '平', 'inf', '无限', '平面'].includes(rawRoc)) {
+            requirement.roc_mm = 'flat';
+          } else if (!Number.isNaN(Number(rawRoc))) {
+            requirement.roc_mm = Number(rawRoc);
+          } else {
+            setError(t('inventoryPage.badRoc'));
+            setMatching(false);
+            return;
+          }
+        }
+        if (matchForm.minD.trim()) requirement.min_diameter_mm = Number(matchForm.minD);
       }
-      if (matchForm.minD.trim()) requirement.min_diameter_mm = Number(matchForm.minD);
       const result = await inventoryApi.match(requirement);
       setMatchResult(result);
     } catch (err) {
@@ -192,6 +221,7 @@ function InventoryPage() {
     if (item.roc_is_flat) return t('inventoryPage.flat');
     const parts = [];
     if (item.roc_mm != null) parts.push(`R=${item.roc_mm}mm`);
+    if (item.focal_length_mm != null) parts.push(`F=${item.focal_length_mm}mm`);
     if (item.diameter_mm != null) parts.push(`D=${item.diameter_mm}mm`);
     if (item.dimensions) parts.push(item.dimensions);
     return parts.join(' · ') || '-';
@@ -240,34 +270,81 @@ function InventoryPage() {
           <p className="muted">{t('inventoryPage.matchHint')}</p>
           <div className="input-row">
             <label>
-              {t('inventoryPage.reqWavelength')}
-              <input value={matchForm.wavelength} onChange={(e) => setMatchForm({ ...matchForm, wavelength: e.target.value })} />
-            </label>
-            <label>
-              {t('inventoryPage.reqFunction')}
-              <select value={matchForm.functionName} onChange={(e) => setMatchForm({ ...matchForm, functionName: e.target.value })}>
-                <option value="HR">HR</option>
-                <option value="AR">AR</option>
-                <option value="HT">HT</option>
-                <option value="PR">PR</option>
+              {t('inventoryPage.reqMode')}
+              <select value={matchForm.mode} onChange={(e) => setMatchForm({ ...matchForm, mode: e.target.value })}>
+                <option value="coating">{t('inventoryPage.modeCoating')}</option>
+                <option value="crystal">{t('inventoryPage.modeCrystal')}</option>
               </select>
             </label>
           </div>
-          <div className="input-row">
-            <label>
-              {t('inventoryPage.reqRoc')}
-              <input value={matchForm.roc} onChange={(e) => setMatchForm({ ...matchForm, roc: e.target.value })} placeholder="400 / flat" />
-            </label>
-            <label>
-              {t('inventoryPage.reqMinD')}
-              <input value={matchForm.minD} onChange={(e) => setMatchForm({ ...matchForm, minD: e.target.value })} placeholder="12.7" />
-            </label>
-            <label>
-              {t('inventoryPage.reqMinR')}
-              <input value={matchForm.minR} onChange={(e) => setMatchForm({ ...matchForm, minR: e.target.value })} placeholder="99.5" title={t('inventoryPage.reqMinRHint')} />
-            </label>
-          </div>
-          <p className="muted">{t('inventoryPage.reqMinRHint')}</p>
+          {matchForm.mode === 'coating' ? (
+            <>
+              <div className="input-row">
+                <label>
+                  {t('inventoryPage.reqWavelength')}
+                  <input value={matchForm.wavelength} onChange={(e) => setMatchForm({ ...matchForm, wavelength: e.target.value })} />
+                </label>
+                <label>
+                  {t('inventoryPage.reqFunction')}
+                  <select value={matchForm.functionName} onChange={(e) => setMatchForm({ ...matchForm, functionName: e.target.value })}>
+                    <option value="HR">HR</option>
+                    <option value="AR">AR</option>
+                    <option value="HT">HT</option>
+                    <option value="PR">PR</option>
+                  </select>
+                </label>
+              </div>
+              <div className="input-row">
+                <label>
+                  {t('inventoryPage.reqRoc')}
+                  <input value={matchForm.roc} onChange={(e) => setMatchForm({ ...matchForm, roc: e.target.value })} placeholder="400 / flat" />
+                </label>
+                <label>
+                  {t('inventoryPage.reqMinD')}
+                  <input value={matchForm.minD} onChange={(e) => setMatchForm({ ...matchForm, minD: e.target.value })} placeholder="12.7" />
+                </label>
+                <label>
+                  {t('inventoryPage.reqMinR')}
+                  <input value={matchForm.minR} onChange={(e) => setMatchForm({ ...matchForm, minR: e.target.value })} placeholder="99.5" title={t('inventoryPage.reqMinRHint')} />
+                </label>
+              </div>
+              <p className="muted">{t('inventoryPage.reqMinRHint')}</p>
+            </>
+          ) : (
+            <>
+              <div className="input-row">
+                <label>
+                  {t('inventoryPage.reqLambda1')}
+                  <input value={matchForm.lambda1} onChange={(e) => setMatchForm({ ...matchForm, lambda1: e.target.value })} placeholder="1064" />
+                </label>
+                <label>
+                  {t('inventoryPage.reqLambda2')}
+                  <input value={matchForm.lambda2} onChange={(e) => setMatchForm({ ...matchForm, lambda2: e.target.value })} placeholder={t('inventoryPage.reqLambda2Hint')} />
+                </label>
+              </div>
+              <div className="input-row">
+                <label>
+                  {t('inventoryPage.reqPmType')}
+                  <select value={matchForm.pmType} onChange={(e) => setMatchForm({ ...matchForm, pmType: e.target.value })}>
+                    <option value="">{t('inventoryPage.pmAuto')}</option>
+                    <option value="I">I</option>
+                    <option value="II">II</option>
+                  </select>
+                </label>
+                <label>
+                  {t('inventoryPage.reqCrystalMat')}
+                  <select value={matchForm.crystalMat} onChange={(e) => setMatchForm({ ...matchForm, crystalMat: e.target.value })}>
+                    <option value="">{t('inventoryPage.anyMaterial')}</option>
+                    <option value="lbo">LBO</option>
+                    <option value="bbo">BBO</option>
+                    <option value="bibo">BIBO</option>
+                    <option value="ktp">KTP</option>
+                  </select>
+                </label>
+              </div>
+              <p className="muted">{t('inventoryPage.crystalMatchHint')}</p>
+            </>
+          )}
           <button className="btn btn-primary" type="submit" disabled={matching}>
             {matching ? t('inventoryPage.matching') : t('inventoryPage.matchBtn')}
           </button>
@@ -283,6 +360,15 @@ function InventoryPage() {
               <div>
                 <strong>#{c.item_id} {c.name}</strong>
                 <p className="muted">{c.raw_spec}</p>
+                {c.parameters?.cut_angle && (
+                  <p className="muted">
+                    ∠ {t('inventoryPage.cutAngle')}
+                    [{['design_match', 'maybe_usable', 'unknown', 'off', 'material_mismatch'].includes(c.parameters.cut_angle.status)
+                      ? t(`inventoryPage.cutStatus.${c.parameters.cut_angle.status}`)
+                      : c.parameters.cut_angle.status}]
+                    ：{c.parameters.cut_angle.detail}
+                  </p>
+                )}
                 {(c.must_measure || []).length > 0 && (
                   <p className="muted">⚠ {t('caseDetail.modulesTab.mustMeasure')}: {c.must_measure.join('；')}</p>
                 )}
