@@ -70,18 +70,36 @@
   }
 
   /* The kernel/model distinction is carried by colour on screen. On paper the
-     colours are dropped, so the physics block keeps an explicit border and the
-     chips keep their fills. */
-  .stat-chip,
-  .disclaimer,
-  .meta-pill {
+     colour is replaced by structure: light fills and borders, never the dark
+     screen backgrounds — near-black text on the screen's dark chip fill would
+     print as an unreadable block. stat-chip's translucent tints survive
+     print-color-adjust; disclaimer/meta-pill's solid dark fills must not. */
+  .stat-chip {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
     color: #111 !important;
   }
 
+  .disclaimer,
+  .meta-pill {
+    background: #f2f2f2 !important;
+    color: #111 !important;
+    border: 1px solid #999 !important;
+  }
+
   .disclaimer {
-    border-left: 3px solid #888 !important;
+    border-left: 3px solid #555 !important;
+  }
+
+  /* Warnings are the part of the page that must NOT be the faintest thing on
+     it: the kernel-didn't-run alert and the unstable-cavity warning use
+     .error. The screen red prints as ~50% grey on a mono laser, so on
+     paper it becomes a bordered black-on-white callout instead. */
+  .error {
+    background: #fff !important;
+    color: #111 !important;
+    border: 2px solid #333 !important;
+    font-weight: 600;
   }
 
   /* SVG colours come from CSS classes, so they need print overrides too —

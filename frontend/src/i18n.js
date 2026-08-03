@@ -112,6 +112,8 @@ export const translations = {
         formats: '支持 PDF、TXT、Markdown、CSV、JSON、LOG，上传后会自动进入知识库。',
         unknownType: '未知类型', analyzeImage: '分析图片', analyzing: '分析中...',
         uploadFailed: '上传失败：', generateFailed: '生成失败：',
+        deleteConfirm: '确定删除这个附件吗？它的文件和知识索引会一起删除,无法恢复。',
+        deleteFailed: '附件删除失败：',
       },
       modulesTab: {
         addTitle: '添加 Case 模块',
@@ -433,6 +435,8 @@ export const translations = {
         formats: 'Supports PDF, TXT, Markdown, CSV, JSON, LOG. Files are automatically indexed into the knowledge base.',
         unknownType: 'Unknown type', analyzeImage: 'Analyze image', analyzing: 'Analyzing...',
         uploadFailed: 'Upload failed: ', generateFailed: 'Generation failed: ',
+        deleteConfirm: 'Delete this attachment? Its file and knowledge index are removed permanently.',
+        deleteFailed: 'Attachment delete failed: ',
       },
       modulesTab: {
         addTitle: 'Add Case Module',

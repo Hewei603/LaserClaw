@@ -8,7 +8,6 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from .api import admin, agent, attachments, case_modules, cases, collaboration, evals, generation, inventory, knowledge, versioning
 from .config import get_settings
@@ -62,7 +61,11 @@ async def request_id_middleware(request: Request, call_next):
     return response
 
 
-app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
+# NOTE: upload_dir is deliberately NOT mounted as a static route. Attachments
+# are served through /api/attachments/{id} (attachments.py), which checks the
+# principal's case ACL; a bare StaticFiles mount would expose every uploaded
+# file — case attachments, lab documents, the inventory workbook — to anyone
+# who can reach the port, even with REQUIRE_AUTH=true.
 
 app.include_router(cases.router, prefix="/api/cases", tags=["cases"])
 app.include_router(case_modules.router, prefix="/api/cases", tags=["case-modules"])

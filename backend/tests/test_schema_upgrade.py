@@ -129,7 +129,12 @@ def test_a_not_null_column_is_reported_rather_than_faked(tmp_path, caplog):
     applied = _sync_with_metadata(grown, bind, caplog)
 
     assert applied == [], "must not invent a value for a NOT NULL column"
-    assert any("alembic" in record.message.lower() for record in caplog.records)
+    warned = [r.message.lower() for r in caplog.records]
+    assert any("cannot be added" in msg for msg in warned)
+    # The advice must be something the create_all/launcher user can actually
+    # follow: their database has no alembic stamp, so "run alembic upgrade
+    # head" would die on the first existing table.
+    assert not any("upgrade head" in msg for msg in warned)
 
 
 def _sync_with_metadata(metadata, bind, caplog):

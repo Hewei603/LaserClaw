@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..knowledge.ingestion import create_generated_content_source
-from ..inventory.evaluator import evaluate_candidates
+from ..inventory.evaluator import available_mirror_rocs, evaluate_candidates
 from ..models import AgentStep, AgentTask, CaseModule, ExperimentCase, GeneratedContent
 from ..observability.audit import record_audit
 from ..observability.usage import apply_usage_to_generated
@@ -132,7 +132,11 @@ async def create_and_run_task(
             return task
 
         try:
-            content = await _generate_artifact(mode, case_payload, goal, extra_context=extra_context or retrieval)
+            content = await _generate_artifact(
+                mode, case_payload, goal,
+                extra_context=extra_context or retrieval,
+                available_rocs=available_mirror_rocs(db) if mode == "plan" else None,
+            )
         except HTTPException:
             raise
         except Exception as exc:
@@ -340,19 +344,23 @@ async def _generate_artifact(
     goal: str,
     *,
     extra_context: dict[str, Any] | None = None,
+    available_rocs: list | None = None,
 ) -> dict[str, Any]:
     provider = get_ai_provider()
     payload = dict(case_payload)
     if extra_context:
         payload["agent_context"] = extra_context
     payload["user_request"] = goal
+    physics: dict[str, Any] | None = None
     if mode == "plan":
         # Same inventory-constrained search as the REST path, so the two never
-        # disagree about the recommended cavity.
-        payload["computed_physics"] = await asyncio.to_thread(
+        # disagree about the recommended cavity. The caller supplies the mirror
+        # list because only it holds the db session.
+        physics = await asyncio.to_thread(
             compute_case_physics, payload.get("parameters"),
-            available_rocs=payload.pop("_available_rocs", None),
+            available_rocs=available_rocs,
         )
+        payload["computed_physics"] = physics
     if mode == "troubleshooting":
         return await provider.generate_troubleshooting(payload.get("symptoms", []), payload)
     if mode == "report":
@@ -362,4 +370,12 @@ async def _generate_artifact(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unsupported generation mode '{mode}'",
         )
-    return await provider.generate_plan({**payload, "goal": goal})
+    content = await provider.generate_plan({**payload, "goal": goal})
+    if physics is not None:
+        # Attach the kernel result to the SAVED artifact, exactly as the REST
+        # path does (generation.py). Providers echo prose, not this key, and the
+        # plan tab's green kernel box / red "unverified numbers" warning both
+        # read it — without this an agent-generated plan would render with
+        # neither, hiding whether its numbers were computed or invented.
+        content["computed_physics"] = physics
+    return content

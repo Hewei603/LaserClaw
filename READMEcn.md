@@ -118,12 +118,12 @@ LaserClaw 有两类检索来源：
 
 | 检查项 | 结果 | 复现命令 |
 |---|---|---|
-| 后端测试套件 | 317 passed, 2 skipped | `cd backend && py -m pytest -q` |
+| 后端测试套件 | 321 passed, 2 skipped | `cd backend && py -m pytest -q` |
 | 物理内核对拍(解析解/文献值) | 已含在上面(TMM 与独立的 `tmm` 库对拍至机器精度) | `py -m pytest tests/test_physics_*.py -q` |
 | 意图路由用例 | 57 passed | `py -m pytest tests/test_router.py -q` |
 | RAG 数据集断言 | 8 passed(37 条查询数据集) | `py -m pytest tests/eval_rag_dataset.py -q` |
 | Agent 轨迹完整性 | 7 passed | `py -m pytest tests/eval_agent_trace.py -q` |
-| API 鉴权依赖审计 | 74 条 `/api/*` 路由,0 findings | `py scripts/audit_endpoint_acl.py` |
+| API 鉴权依赖审计 | 78 条 `/api/*` 路由,0 findings | `py scripts/audit_endpoint_acl.py` |
 | 前端 lint/build | 通过 | `cd frontend && npm run lint && npm run build` |
 
 合成语料上的检索质量与延迟
