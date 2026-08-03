@@ -52,6 +52,22 @@ def test_focal_regex_does_not_eat_letters():
     assert parse_geometry("HF膜 D=25mm").focal_length_mm is None
 
 
+def test_focal_length_units_are_converted_not_ignored():
+    # 'f=1m' 是 1000mm 的透镜,按 1mm 收录会让学生按错误焦距设计光路。
+    assert parse_geometry("f=1m").focal_length_mm == 1000.0
+    assert parse_geometry("f=50cm").focal_length_mm == 500.0
+    assert parse_geometry("F=300mm").focal_length_mm == 300.0
+
+
+def test_focal_regex_rejects_foreign_units_and_glass_grades():
+    # 'F 700nm' 是滤光片谱线,不是 700mm 透镜;'F2' 是火石玻璃牌号。
+    # 两者都应留空,让该行进"几何列未解析"复核队列,而不是收录一个错数。
+    assert parse_geometry("滤光片 F 700nm").focal_length_mm is None
+    assert parse_geometry("F2 平凸").focal_length_mm is None
+    # 裸 F<数字> 只有数值 ≥10 才当透镜(F100 是透镜写法)
+    assert parse_geometry("F100").focal_length_mm == 100.0
+
+
 def test_plain_forms_still_parse():
     geo = parse_geometry("D=25mm", "R=-100")
     assert geo.diameter_mm == 25.0

@@ -54,7 +54,7 @@ def test_both_exports_carry_utf8_bom_for_excel(client):
     case_id = _make_case_with_parts(client)
     for path in ("bom.csv", "procurement.csv"):
         resp = client.get(f"/api/cases/{case_id}/components/{path}", headers=HEADERS)
-        assert resp.text.startswith("﻿"), f"{path} lacks the UTF-8 BOM Excel needs for Chinese"
+        assert resp.text.startswith("\ufeff"), f"{path} lacks the UTF-8 BOM Excel needs for Chinese"
 
 
 def test_module_run_config_replaces_stored(client):

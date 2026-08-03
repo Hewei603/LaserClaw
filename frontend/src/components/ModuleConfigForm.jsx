@@ -50,6 +50,20 @@ const HINT_KEYS = {
 
 const FLAT_WORDS = ['flat', 'inf', 'infinite', 'plane', '平', '平镜', '平面', '无限'];
 
+// Config keys buildModuleConfig may produce per module type. The run payload
+// REPLACES the stored config, so the caller must carry over every stored key
+// the form does NOT own (power_curve's inline `data`, coating_tmm's
+// `vendor_curve`, hand-written advanced keys) — otherwise one click of "run"
+// after a page refresh silently deletes them. Form-owned keys are the form's
+// alone: absent from the form means deliberately cleared.
+export const OWNED_KEYS = {
+  cavity_design: ['wavelength_nm', 'R1_mm', 'R2_mm', 'L_scan_mm', 'target_waist_mm', 'crystal'],
+  phase_match: ['crystal', 'lambda1_nm', 'lambda2_nm', 'pm_type'],
+  coating_tmm: ['nominal', 'query_wavelengths_nm', 'aoi_deg'],
+  power_curve: ['output_coupler_T_pct', 'label'],
+  stability: ['roi'],
+};
+
 // Laser students write numbers with units ("300mm", "1064 nm", "5°"). Strip a
 // trailing unit, then require the rest to be a plain number — anything else is
 // a hard parse error surfaced to the user, never a silent drop.
@@ -135,8 +149,8 @@ export function buildModuleConfig(moduleType, values = {}) {
 
 // Inverse of buildModuleConfig: persisted config_json -> form strings, so the
 // form always DISPLAYS what will actually run (the run endpoint persists the
-// last effective config). Unknown/extra keys stay invisible here but survive
-// in the advanced-JSON path.
+// last effective config). Unknown/extra keys stay invisible here; the run
+// handler carries them over explicitly via OWNED_KEYS (see CaseDetail).
 export function configToFormValues(moduleType, config = {}) {
   const values = {};
   const put = (key, v) => {

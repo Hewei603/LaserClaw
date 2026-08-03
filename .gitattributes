@@ -1,0 +1,3 @@
+# cmd 逐行从磁盘读取 bat;LF 行尾会让块解析错乱(条件为假时块体被执行)。
+# 强制 bat 始终以 CRLF 检出——git archive / GitHub ZIP 下载同样遵守此属性。
+*.bat text eol=crlf
