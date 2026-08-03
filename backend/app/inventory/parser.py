@@ -222,6 +222,7 @@ def parse_coating(text: str, surface: str) -> ParsedCoating:
 class ParsedGeometry:
     roc_mm: float | None = None
     roc_is_flat: bool = False
+    focal_length_mm: float | None = None   # lenses; sign kept (negative = diverging)
     diameter_mm: float | None = None
     thickness_mm: float | None = None
     dimensions: str | None = None
@@ -244,9 +245,25 @@ def parse_geometry(*cells: str) -> ParsedGeometry:
         geo.roc_is_flat = True
         geo.roc_mm = None
 
-    m = re.search(r"[DΦφ]\s*=?\s*(\d+(?:\.\d+)?)\s*mm", text)
+    # Lens focal length: F=300mm / f=250 mm / bare F100. Sign kept (negative =
+    # diverging, e.g. "F=-99.6，R=-51.5" on a plano-concave). The lookbehind
+    # keeps the F of e.g. "HF" or "0.5F" from matching.
+    m = re.search(r"(?<![A-Za-z0-9])[Ff]\s*=?\s*(-?\d+(?:\.\d+)?)\s*(?:mm)?", text)
+    if m:
+        geo.focal_length_mm = float(m.group(1))
+
+    # Diameter×thickness shorthand: Φ25*5mm / D=25.4*5mm (two factors, unlike
+    # the crystal 3*3*5mm3 triple handled below).
+    m = re.search(r"[DΦφ]\s*[=>≥]?\s*(\d+(?:\.\d+)?)\s*[*×]\s*(\d+(?:\.\d+)?)\s*mm", text)
     if m:
         geo.diameter_mm = float(m.group(1))
+        geo.thickness_mm = float(m.group(2))
+    else:
+        # D=25mm and the lower-bound form D>18mm (stored as the bound: the
+        # aperture gate compares "at least" semantics anyway)
+        m = re.search(r"[DΦφ]\s*[=>≥]?\s*(\d+(?:\.\d+)?)\s*mm", text)
+        if m:
+            geo.diameter_mm = float(m.group(1))
 
     m = re.search(r"厚度\s*(\d+(?:\.\d+)?)\s*mm", text)
     if m:

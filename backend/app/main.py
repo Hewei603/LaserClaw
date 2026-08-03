@@ -13,12 +13,20 @@ from fastapi.staticfiles import StaticFiles
 from .api import admin, agent, attachments, case_modules, cases, collaboration, evals, generation, inventory, knowledge, versioning
 from .config import get_settings
 from .database import Base, engine, sync_additive_schema
+from .version import APP_VERSION
 from . import models  # noqa: F401 - register SQLAlchemy models
 
 settings = get_settings()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("laserclaw")
+
+# Must run before create_all: create_all would materialize an empty database at
+# the new location, and the legacy-data copy only ever fills an empty target.
+from .data_migration import migrate_legacy_data  # noqa: E402
+
+for _note in migrate_legacy_data(settings):
+    logger.info(_note)
 
 if settings.auto_create_tables:
     Base.metadata.create_all(bind=engine)
@@ -30,7 +38,7 @@ os.makedirs(settings.upload_dir, exist_ok=True)
 app = FastAPI(
     title="LaserClaw API",
     description="Retrieval-augmented laser experiment workflow and Agent system.",
-    version="2.0.0",
+    version=APP_VERSION,
 )
 
 app.add_middleware(
@@ -71,13 +79,16 @@ app.include_router(inventory.router, prefix="/api/inventory", tags=["inventory"]
 
 @app.get("/")
 async def root():
-    return {"message": "LaserClaw API", "version": "2.0.0", "docs": "/docs"}
+    return {"message": "LaserClaw API", "version": APP_VERSION, "docs": "/docs"}
 
 
 @app.get("/health")
 async def health():
     # The provider block lets the frontend show a "demo mode" banner: mock
     # output reads like real output, so the user must be told which is running.
+    # The version lets it show a "stale backend, restart the launcher" banner:
+    # the launcher-started process keeps serving old code until its window is
+    # closed, and the user has no other way to notice.
     from .providers import provider_status
 
-    return {"status": "healthy", "provider": provider_status()}
+    return {"status": "healthy", "version": APP_VERSION, "provider": provider_status()}

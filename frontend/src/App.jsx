@@ -9,6 +9,7 @@ import Home from './pages/Home';
 import InventoryPage from './pages/InventoryPage';
 import LabDocuments from './pages/LabDocuments';
 import { LanguageProvider, useLanguage } from './LanguageContext';
+import { EXPECTED_BACKEND_VERSION } from './expectedBackend';
 import './App.css';
 import './print.css';
 import logo from './assets/logo.png';
@@ -46,29 +47,55 @@ function FooterText() {
 function ProviderBanner() {
   const { t } = useLanguage();
   const [provider, setProvider] = useState(null);
+  const [backendVersion, setBackendVersion] = useState(undefined); // undefined = not yet answered
 
   useEffect(() => {
     let cancelled = false;
     apiClient.get('/health')
-      .then((res) => { if (!cancelled) setProvider(res.data?.provider || null); })
+      .then((res) => {
+        if (cancelled) return;
+        setProvider(res.data?.provider || null);
+        // Pre-2.1 backends report no version at all — that is exactly the
+        // stale-process case this banner exists for, so map it to null.
+        setBackendVersion(res.data?.version || null);
+      })
       .catch(() => {});      // unreachable backend already yields page-level errors
     return () => { cancelled = true; };
   }, []);
 
-  if (!provider) return null;
+  // The launcher-started backend keeps serving old code until its window is
+  // closed; the user cannot tell from the page alone, so tell them loudly.
+  const versionBanner = (backendVersion !== undefined && backendVersion !== EXPECTED_BACKEND_VERSION)
+    ? (
+      <div className="error" style={{ margin: '0.5rem 1rem' }}>
+        ⚠ {t('banner.backendOutdated')}
+        {backendVersion ? `（${t('banner.backendVersion')} ${backendVersion} ≠ ${EXPECTED_BACKEND_VERSION}）` : ''}
+      </div>
+    )
+    : null;
+
+  if (!provider) return versionBanner;
   // Mock output is indistinguishable from a real model's by tone — the user
   // must always be able to see which one produced what they are reading.
   if (provider.error) {
-    return <div className="error" style={{ margin: '0.5rem 1rem' }}>{t('banner.providerError')}{provider.error}</div>;
+    return (
+      <>
+        {versionBanner}
+        <div className="error" style={{ margin: '0.5rem 1rem' }}>{t('banner.providerError')}{provider.error}</div>
+      </>
+    );
   }
   if (provider.is_mock) {
     return (
-      <div className="disclaimer" style={{ margin: '0.5rem 1rem' }}>
-        ⚠ {t('banner.demo')}
-      </div>
+      <>
+        {versionBanner}
+        <div className="disclaimer" style={{ margin: '0.5rem 1rem' }}>
+          ⚠ {t('banner.demo')}
+        </div>
+      </>
     );
   }
-  return null;
+  return versionBanner;
 }
 
 function App() {
