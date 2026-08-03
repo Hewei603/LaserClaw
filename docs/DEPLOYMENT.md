@@ -98,10 +98,26 @@ The built-in API-key mode is suitable for local and small trusted deployments. F
 ## Data Locations
 
 - Database: SQLite locally or PostgreSQL in Docker.
-- Uploads: `backend/uploads` locally or `/app/uploads` in Docker.
-- Chroma vector store: `VECTOR_STORE_DIR`.
+- Launcher (`Launch-LaserClaw.bat`) runs: all data lives OUTSIDE the code tree in
+  `%USERPROFILE%\LaserClaw-Data` (`laserclaw.db`, `uploads\`, `vector_store\`).
+  On first start after upgrading from a pre-2.1 layout, the backend copies the
+  legacy in-tree data there automatically (`backend/app/data_migration.py`); the
+  in-tree originals are left behind as a backup.
+- Manual `uvicorn` runs and Docker keep their configured paths (`backend/laserclaw.db`,
+  `/app/uploads`, `VECTOR_STORE_DIR`).
 - Private eval datasets: `docs/evals/private`, ignored by Git except `.gitkeep`.
-- Authorized lab documents: `backend/uploads/authorized_lab_docs`, ignored by Git.
+- Authorized lab documents: `uploads/authorized_lab_docs` under the active upload dir, ignored by Git.
+
+## 更新方法（写给实验室同学）
+
+1. 双击代码文件夹里的 **`Update-LaserClaw.bat`**。它会自动:关闭正在运行的
+   LaserClaw → 从 GitHub 拉取最新代码 → 重新启动。
+2. 如果这台电脑没装 Git(更新器会用中文提示),就找维护者要一份新版压缩包,
+   解压到一个**新文件夹**,双击其中的 `Launch-LaserClaw.bat` 即可。
+3. 实验数据(元件库、案例、借还记录、附件)保存在 `%USERPROFILE%\LaserClaw-Data`,
+   **不在代码文件夹里**——无论哪种更新方式都不会丢数据。
+4. 更新后如果页面顶部出现红色横幅"后端程序是旧版本",按横幅提示关闭两个黑色
+   窗口再重新双击 `Launch-LaserClaw.bat`(启动器也会自动尝试接管旧进程)。
 
 ## Backup Guidance
 

@@ -496,6 +496,7 @@ class InventoryItemResponse(BaseModel):
     diameter_mm: Optional[float] = None
     roc_mm: Optional[float] = None
     roc_is_flat: Optional[bool] = None
+    focal_length_mm: Optional[float] = None
     thickness_mm: Optional[float] = None
     dimensions: Optional[str] = None
     cut_angle_theta_deg: Optional[float] = None
@@ -544,6 +545,22 @@ class SurfaceRequirement(BaseModel):
     min_R_pct: Optional[float] = Field(default=None, ge=0, le=100)
 
 
+class PhaseMatchRequirement(BaseModel):
+    """Target nonlinear interaction for crystal cut-angle matching.
+
+    ``pm_type`` omitted means "either type is acceptable" — the evaluator tries
+    both and reports the closer cut.  ``crystal`` omitted means "judge every
+    crystal by its own material" (a BIBO is compared against the BIBO solution,
+    not the LBO one); set it to restrict candidates to one material.
+    """
+    lambda1_nm: float = Field(..., gt=100, lt=5000)
+    lambda2_nm: Optional[float] = Field(default=None, gt=100, lt=5000)  # SFG only
+    pm_type: Optional[str] = Field(default=None, pattern="^(?i)(I|II)$")
+    crystal: Optional[str] = Field(default=None, max_length=20)
+    tol_match_deg: float = Field(default=1.0, gt=0, le=10)
+    tol_retune_deg: float = Field(default=5.0, gt=0, le=30)
+
+
 class InventoryBorrowRequest(BaseModel):
     # Required because local mode has no login: without a typed name, "who has
     # it" would be permanently blank, which is the one question this feature exists to answer.
@@ -569,6 +586,7 @@ class ComponentMatchRequest(BaseModel):
     role: str = Field(default="component", max_length=120)
     category: Optional[str] = None
     surfaces: List[SurfaceRequirement] = Field(default_factory=list)
+    phase_match: Optional[PhaseMatchRequirement] = None  # crystal cut-angle matching
     roc_mm: Optional[Any] = None          # number or "flat"
     roc_tol_pct: float = Field(default=2.0, ge=0, le=50)
     min_diameter_mm: Optional[float] = Field(default=None, gt=0)

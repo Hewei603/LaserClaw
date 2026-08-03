@@ -29,9 +29,20 @@ from ..models import InventoryItem, InventoryLoan
 from ..models.inventory import resolve_condition
 from ..physics.archetypes import stopband_edges
 from ..physics.materials import n_real
+from ..physics.toolkit import run_phase_match
 
 _TRANSMIT = {"AR", "HT"}
 _REFLECT = {"HR"}
+
+# Longest name first so a substring can never shadow a longer material name.
+_CRYSTAL_MATERIALS = ("BIBO", "LBO", "BBO", "KTP")
+# Gain crystals are deliberately excluded: a cut-angle requirement is asking
+# for a frequency-conversion crystal, and 20 Yb/Nd hosts answering "material
+# unknown, please measure" would bury the two LBO rows that matter.
+_CRYSTAL_CATEGORIES = ("nonlinear_crystal", "crystal_other")
+# Materials that can never angle-phase-match (isotropic or gain hosts) — a
+# name match here is a hard veto, not an "unknown, go measure".
+_NON_PM_MATERIALS = ("CAF2", "YVO4", "CALGO", "GYAP", "CYGA", "YAG", "YLF", "KGW", "蓝宝石")
 
 # Representative quarter-wave indices for the stopband prior (same defaults as
 # the coating tool's archetype mode).
@@ -222,6 +233,130 @@ def _judge_coating_requirement(req: dict, item: InventoryItem) -> dict:
     return best
 
 
+def _detect_material(item) -> str | None:
+    """Nonlinear-crystal material from the item's name/material/spec text, or None."""
+    text = (f"{item.name or ''} {getattr(item, 'material', '') or ''} "
+            f"{getattr(item, 'raw_spec', '') or ''}").upper()
+    for mat in _CRYSTAL_MATERIALS:
+        if mat in text:
+            return mat.lower()
+    return None
+
+
+def _angle_delta(labelled: float, required: float) -> float:
+    """Angular deviation with crystal-axis equivalence.
+
+    A cut labelled θ and one labelled 180°−θ select the same propagation axis
+    (vendors use both conventions; the lab's BIBO is labelled θ=159.6° for a
+    computed 20.3° cut), so the deviation is the minimum over both readings.
+    """
+    best = 360.0
+    for a in (labelled, 180.0 - labelled):
+        d = abs(a - required) % 360.0
+        best = min(best, d, 360.0 - d)
+    return best
+
+
+def _judge_cut_angle(item, pm_req: dict) -> dict:
+    """Three-state cut-angle judgement of one crystal vs a target interaction.
+
+    Computes the required phase-match angles for THIS item's material (each
+    material has its own solution — a BIBO is judged as BIBO, not against the
+    LBO angle) and compares them with the labelled cut.  A label is only a
+    label: even a design_match keeps ``needs_measurement`` when one angular
+    dimension is unlabelled, and retunable cuts always go to the measure list.
+    """
+    text = (f"{item.name or ''} {getattr(item, 'material', '') or ''} "
+            f"{getattr(item, 'raw_spec', '') or ''}").upper()
+    non_pm = next((m for m in _NON_PM_MATERIALS if m in text), None)
+    material = _detect_material(item)
+    if material is None and non_pm:
+        return {"status": "material_mismatch", "material": non_pm.lower(),
+                "detail": f"{non_pm} 不是角度相位匹配晶体(各向同性/增益基质),不能用于倍频/和频"}
+    want = (pm_req.get("crystal") or "").strip().lower() or None
+    if want and material and material != want:
+        return {"status": "material_mismatch", "material": material,
+                "detail": f"晶体材料 {material.upper()} ≠ 需求 {want.upper()}"}
+    material = material or want
+    if material is None:
+        return {"status": "unknown", "material": None, "needs_measurement": True,
+                "detail": "无法从名称识别晶体材料(LBO/BBO/BIBO/KTP),需人工确认材料与切角"}
+
+    theta = getattr(item, "cut_angle_theta_deg", None)
+    phi = getattr(item, "cut_angle_phi_deg", None)
+    if theta is None and phi is None:
+        return {"status": "unknown", "material": material, "needs_measurement": True,
+                "detail": "标签未给切角 θ/φ — 需向厂家核对或按相位匹配实测"}
+
+    pm_types = [str(pm_req["pm_type"]).upper()] if pm_req.get("pm_type") else ["I", "II"]
+    best: dict | None = None
+    any_solution = False
+    for pm_type in pm_types:
+        result = run_phase_match({
+            "crystal": material,
+            "lambda1_nm": pm_req["lambda1_nm"],
+            "lambda2_nm": pm_req.get("lambda2_nm"),
+            "pm_type": pm_type,
+        })
+        if result.get("status") != "completed":
+            continue
+        for sol in result["solutions"]:
+            if sol.get("theta_deg") is None:
+                continue
+            any_solution = True
+            deltas: list[float] = []
+            unchecked: list[str] = []
+            for label, own, req_angle in (("θ", theta, sol.get("theta_deg")),
+                                          ("φ", phi, sol.get("phi_deg"))):
+                if req_angle is None:
+                    continue
+                if own is None:
+                    unchecked.append(label)
+                else:
+                    deltas.append(_angle_delta(float(own), float(req_angle)))
+            if not deltas:
+                continue
+            deviation = max(deltas)
+            if best is None or deviation < best["deviation_deg"]:
+                best = {
+                    "deviation_deg": round(deviation, 2),
+                    "material": material,
+                    "required": {"plane": sol.get("plane"), "pm_type": pm_type,
+                                 "theta_deg": sol.get("theta_deg"), "phi_deg": sol.get("phi_deg"),
+                                 "lambda3_nm": sol.get("lambda3_nm")},
+                    "cut": {"theta_deg": theta, "phi_deg": phi},
+                    "unchecked": unchecked,
+                }
+
+    lam_txt = f"{pm_req['lambda1_nm']:g}nm" + (
+        f"+{pm_req['lambda2_nm']:g}nm" if pm_req.get("lambda2_nm") else " SHG")
+    if best is None:
+        if not any_solution:
+            return {"status": "off", "material": material,
+                    "detail": f"{material.upper()} 在 {lam_txt} 无角度相位匹配解(或不支持该配置)"}
+        return {"status": "unknown", "material": material, "needs_measurement": True,
+                "detail": "标签切角与所需匹配面的角度维度对不上(如只标了 φ 而解在 θ 面),需人工核对"}
+
+    req = best["required"]
+    req_txt = (f"{material.upper()} {req['plane'] or '单轴'}面 {req['pm_type']}类需 "
+               f"θ={req['theta_deg']}°" + (f"/φ={req['phi_deg']}°" if req["phi_deg"] is not None else ""))
+    own_txt = "该件 θ=" + (f"{theta:g}°" if theta is not None else "未标") + (
+        f"/φ={phi:g}°" if phi is not None else "/φ=未标")
+    detail = f"{req_txt},{own_txt} → Δ={best['deviation_deg']:g}°"
+    if best["unchecked"]:
+        detail += f"({'/'.join(best['unchecked'])} 未标注,未核对)"
+
+    tol_match = float(pm_req.get("tol_match_deg", 1.0))
+    tol_retune = float(pm_req.get("tol_retune_deg", 5.0))
+    if best["deviation_deg"] <= tol_match:
+        return {"status": "design_match", "detail": detail,
+                "needs_measurement": bool(best["unchecked"]), **best}
+    if best["deviation_deg"] <= tol_retune:
+        return {"status": "maybe_usable", "needs_measurement": True,
+                "detail": detail + ",小角度重调可能可行,需实测转换效率与镀膜失谐", **best}
+    return {"status": "off", "detail": detail + ",切角偏差过大", **best}
+
+
 def evaluate_item(item: InventoryItem, requirement: dict, loaned_qty: float = 0.0) -> dict:
     """Produce the structured verdict of one inventory item vs a requirement spec.
 
@@ -321,6 +456,24 @@ def evaluate_item(item: InventoryItem, requirement: dict, loaned_qty: float = 0.
             must_measure.append(f"确认 {j['requirement']} 阈值(标称未给数值)")
     params["coatings"] = coating_judgments
 
+    # crystal cut angle vs the requested nonlinear interaction (three-state,
+    # same honesty rules as coatings: a label is not a measurement)
+    pm_req = requirement.get("phase_match")
+    if pm_req:
+        cut = _judge_cut_angle(item, pm_req)
+        params["cut_angle"] = cut
+        if cut["status"] == "material_mismatch":
+            hard.append(f"晶体材料不符: {cut['detail']}")
+        elif cut["status"] == "off":
+            hard.append(f"切角不适用: {cut['detail']}")
+        elif cut["status"] == "unknown":
+            unknowns.append("晶体切角/材料未知")
+            must_measure.append(cut["detail"])
+        elif cut["status"] == "maybe_usable":
+            must_measure.append(f"切角重调验证: {cut['detail']}")
+        elif cut.get("needs_measurement"):
+            must_measure.append(f"核对切角未标注的维度: {cut['detail']}")
+
     return {
         "item_id": item.id,
         "name": item.name,
@@ -375,8 +528,22 @@ def _dominates(a: dict, b: dict) -> bool:
         margin = dia.get("margin_mm")
         return 0.0 if margin is None else max(0.0, -float(margin))
 
-    dims_a = (coat_rank(a), threshold_rank(a), unknown_count(a), roc_dev(a), aperture_deficit(a))
-    dims_b = (coat_rank(b), threshold_rank(b), unknown_count(b), roc_dev(b), aperture_deficit(b))
+    cut_order = {"design_match": 0, "maybe_usable": 1, "unknown": 2}
+
+    def cut_rank(v):
+        cut = v["parameters"].get("cut_angle")
+        # 0 (neutral) when the requirement asked for no interaction: the
+        # dimension must not separate items it was never computed for.
+        return 0 if not cut else cut_order.get(cut["status"], 3)
+
+    def cut_dev(v):
+        cut = v["parameters"].get("cut_angle") or {}
+        return float(cut.get("deviation_deg") or 0.0)
+
+    dims_a = (coat_rank(a), threshold_rank(a), unknown_count(a), roc_dev(a),
+              aperture_deficit(a), cut_rank(a), cut_dev(a))
+    dims_b = (coat_rank(b), threshold_rank(b), unknown_count(b), roc_dev(b),
+              aperture_deficit(b), cut_rank(b), cut_dev(b))
     return all(x <= y for x, y in zip(dims_a, dims_b)) and dims_a != dims_b
 
 
@@ -390,6 +557,10 @@ def evaluate_candidates(db: Session, requirement: dict) -> dict:
     category = requirement.get("category")
     if category:
         query = query.filter(InventoryItem.category == category)
+    elif requirement.get("phase_match"):
+        # A cut-angle requirement is a crystal requirement; without this default
+        # every mirror in the lab would surface as "material unknown, measure".
+        query = query.filter(InventoryItem.category.in_(_CRYSTAL_CATEGORIES))
     items = query.all()
 
     # One grouped query rather than a loan lookup per item.
