@@ -250,6 +250,46 @@ def test_agent_plan_task_receives_computed_physics(client, captured_plan_input):
     assert physics and physics["available"] is True
     assert physics["results"]["cavity_design"]["recommended_length_mm"] > 0
 
+    # The SAVED artifact must carry the kernel result too — the plan tab's
+    # green kernel box and red "unverified" warning both read it, and the
+    # provider only echoes prose, never this key.
+    contents = client.get(f"/api/cases/{case_id}/generated-contents").json()
+    plans = [c for c in contents if c["content_type"] == "plan"]
+    assert plans and plans[-1]["content"].get("computed_physics"), \
+        "agent-generated plan saved without computed_physics: the audit box disappears"
+
+
+def test_agent_plan_search_is_constrained_to_the_inventory(client, captured_plan_input, db):
+    """The agent path must search the mirrors the lab owns, like the REST path.
+
+    A plan recommending a curvature nobody has sends the student to component
+    matching to be told the mirror does not exist.
+    """
+    from app.models import InventoryItem
+
+    db.add(InventoryItem(name="R=777 特殊腔镜", category="mirror",
+                         roc_mm=777.0, quantity=1, condition="ok",
+                         source_file="stock.xlsx"))
+    # A mirror a human marked broken must NOT seed the search, whatever the
+    # workbook text said (resolve_condition: human verdict first).
+    db.add(InventoryItem(name="R=333 崩边", category="mirror",
+                         roc_mm=333.0, quantity=1, condition="ok",
+                         condition_manual="damaged", source_file="stock.xlsx"))
+    db.commit()
+
+    case_id = _make_case(client, {"wavelength_nm": 1064})
+    resp = client.post("/api/agent/tasks", json={
+        "case_id": case_id, "goal": "帮我设计一个腔", "mode": "plan",
+    })
+    assert resp.status_code in (200, 201), resp.text
+
+    space = captured_plan_input[-1]["computed_physics"]["results"]["cavity_design_search"]["search_space"]
+    assert space["roc_source"] == "lab inventory", \
+        "agent path fell back to the catalogue while the lab has mirrors"
+    assert 777.0 in space["candidate_rocs"]
+    assert 333.0 not in space["candidate_rocs"], \
+        "a manually-damaged mirror seeded the design search"
+
 
 def test_plan_prompt_says_unknown_rather_than_letting_the_model_guess(
     client, captured_plan_input

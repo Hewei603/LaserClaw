@@ -741,7 +741,17 @@ function CaseDetail() {
                   </button>
                 )}
                 <a href={`${API_BASE_URL}/api/attachments/${attachment.id}`} className="btn btn-secondary" target="_blank" rel="noreferrer">{t('common.download')}</a>
-                <button className="btn btn-danger" onClick={async () => { await casesApi.deleteAttachment(attachment.id); await loadData(); }}>{t('common.delete')}</button>
+                <button className="btn btn-danger" onClick={async () => {
+                  // Deleting also removes the file and its knowledge index —
+                  // the same confirm-first rule as every other delete here.
+                  if (!window.confirm(t('caseDetail.attachmentsTab.deleteConfirm'))) return;
+                  try {
+                    await casesApi.deleteAttachment(attachment.id);
+                    await loadData();
+                  } catch (err) {
+                    setActionError(t('caseDetail.attachmentsTab.deleteFailed') + err.message);
+                  }
+                }}>{t('common.delete')}</button>
               </div>
             </div>
           ))}

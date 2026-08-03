@@ -6,7 +6,7 @@ This file tracks the concrete evidence required before LaserClaw can be called e
 
 | Gate | Command / Evidence | Current Status |
 |---|---|---|
-| Backend regression tests | `cd backend; py -m pytest tests -q` | Passed: `317 passed, 2 skipped` |
+| Backend regression tests | `cd backend; py -m pytest tests -q` | Passed: `321 passed, 2 skipped` |
 | Backend lint | `py -m ruff check backend` | Passed |
 | Frontend lint | `cd frontend; npm run lint` | Passed |
 | Frontend production build | `cd frontend; npm run build` | Passed |
