@@ -35,6 +35,7 @@ class InventoryItem(Base):
     diameter_mm = Column(Float, nullable=True)
     roc_mm = Column(Float, nullable=True)          # concave positive; NULL = flat/unknown (see roc_is_flat)
     roc_is_flat = Column(Boolean, default=False)
+    focal_length_mm = Column(Float, nullable=True)  # lenses; sign kept (negative = diverging)
     thickness_mm = Column(Float, nullable=True)
     dimensions = Column(String(100), nullable=True)  # e.g. "3*3*25mm3" for crystals
     # crystal-specific

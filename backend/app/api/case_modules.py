@@ -694,7 +694,15 @@ async def run_case_module(
     """Run the module-specific analysis or generation workflow."""
     module = _get_module_or_404(db, module_id)
     _assert_module_edit(db, module, principal)
-    config = _merge_config(module, payload.config_json)
+    # A non-empty payload REPLACES the stored config: the frontend form is
+    # pre-filled from the stored config and sends the complete effective set,
+    # so merging would make a cleared field impossible to ever clear (the old
+    # value would silently win on every re-run). An empty payload re-runs with
+    # the stored config unchanged.
+    if payload.config_json:
+        config = dict(payload.config_json)
+    else:
+        config = _merge_config(module)
     module.config_json = config
     module.status = "running"
     db.flush()
@@ -844,8 +852,55 @@ async def export_procurement_csv(
             item.procurement_status,
             item.notes,
         ])
+    # UTF-8 BOM: without it Excel decodes the Chinese cells as GBK mojibake.
     return Response(
-        content=buffer.getvalue(),
-        media_type="text/csv",
+        content="﻿" + buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="case-{case_id}-procurement.csv"'},
+    )
+
+
+@router.get("/{case_id}/components/bom.csv")
+async def export_bom_csv(
+    case_id: int,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Export ALL component items — owned included — as the full BOM (泵表).
+
+    The procurement export above deliberately filters to not-owned items; a
+    teardown BOM is the opposite case, where every part is already in the
+    machine. Chinese headers because the deliverable is an Excel sheet handed
+    to the advisor, not a machine-readable interchange file.
+    """
+    case = _get_case_or_404(db, case_id)
+    assert_case_view(db, case, principal)
+    items = (
+        db.query(CaseComponentItem)
+        .filter(CaseComponentItem.case_id == case_id)
+        .order_by(CaseComponentItem.category, CaseComponentItem.name)
+        .all()
+    )
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["类别", "名称", "规格/参数", "数量", "单位", "用途",
+                     "是否已有", "采购状态", "品牌/供应商", "型号", "备注"])
+    for item in items:
+        writer.writerow([
+            item.category,
+            item.name,
+            item.specification,
+            item.quantity,
+            item.unit,
+            item.purpose,
+            "是" if item.owned else "否",
+            item.procurement_status,
+            item.vendor,
+            item.part_number,
+            item.notes,
+        ])
+    return Response(
+        content="﻿" + buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="case-{case_id}-bom.csv"'},
     )

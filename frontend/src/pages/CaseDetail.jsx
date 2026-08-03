@@ -5,6 +5,7 @@ import { API_BASE_URL } from '../api/client';
 import { casesApi } from '../api/cases';
 import { knowledgeApi } from '../api/knowledge';
 import { ModuleResult, PhysicsFactsBlock } from '../components/ModuleResults';
+import ModuleConfigForm, { buildModuleConfig, configToFormValues } from '../components/ModuleConfigForm';
 import { useLanguage } from '../LanguageContext';
 
 function CaseDetail() {
@@ -44,6 +45,7 @@ function CaseDetail() {
   const [newModuleType, setNewModuleType] = useState('stability');
   const [moduleRunning, setModuleRunning] = useState(null);
   const [moduleConfigs, setModuleConfigs] = useState({});
+  const [moduleForms, setModuleForms] = useState({});
   const [actionError, setActionError] = useState(null);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -76,6 +78,18 @@ function CaseDetail() {
       setAttachments(attachmentsResult);
       setSources(sourcesResult);
       setModules(modulesResult);
+      // Pre-fill each module's form from its persisted config so the form
+      // always shows what a re-run would actually use. Only for modules the
+      // user hasn't started editing — never clobber in-progress input.
+      setModuleForms((prev) => {
+        const next = { ...prev };
+        modulesResult.forEach((m) => {
+          if (!(m.id in next)) {
+            next[m.id] = configToFormValues(m.module_type, m.config_json || {});
+          }
+        });
+        return next;
+      });
       setComponents(componentsResult);
       setTasks(tasksResult);
       setError(null);
@@ -184,11 +198,26 @@ function CaseDetail() {
   };
 
   const handleRunModule = async (module) => {
-    let config = {};
+    // The typed form is the primary input; the advanced JSON textarea (if
+    // filled) is merged over it so power users can still override anything.
+    const built = buildModuleConfig(module.module_type, moduleForms[module.id] || {});
+    if (built.errors.length > 0) {
+      const labels = built.errors.map((k) => t(`caseDetail.modulesTab.form.${k}`)).join('、');
+      setActionError(t('caseDetail.modulesTab.badFieldValue') + labels);
+      return;
+    }
+    let config = built.config;
     const text = (moduleConfigs[module.id] || '').trim();
     if (text) {
       try {
-        config = JSON.parse(text);
+        const advanced = JSON.parse(text);
+        // A valid-JSON string/number/array would silently spread into
+        // nonsense keys — only a plain object is a config override.
+        if (typeof advanced !== 'object' || advanced === null || Array.isArray(advanced)) {
+          setActionError(t('caseDetail.modulesTab.badConfig'));
+          return;
+        }
+        config = { ...config, ...advanced };
       } catch {
         setActionError(t('caseDetail.modulesTab.badConfig'));
         return;
@@ -327,13 +356,23 @@ function CaseDetail() {
               </button>
             </div>
           </div>
-          <textarea
-            className="module-config"
-            value={moduleConfigs[module.id] || ''}
-            onChange={(event) => setModuleConfigs((prev) => ({ ...prev, [module.id]: event.target.value }))}
-            rows={2}
-            placeholder={t('caseDetail.modulesTab.runConfig')}
+          <ModuleConfigForm
+            moduleType={module.module_type}
+            values={moduleForms[module.id] || {}}
+            onChange={(key, value) => setModuleForms((prev) => (
+              { ...prev, [module.id]: { ...(prev[module.id] || {}), [key]: value } }
+            ))}
           />
+          <details>
+            <summary className="muted">{t('caseDetail.modulesTab.advancedJson')}</summary>
+            <textarea
+              className="module-config"
+              value={moduleConfigs[module.id] || ''}
+              onChange={(event) => setModuleConfigs((prev) => ({ ...prev, [module.id]: event.target.value }))}
+              rows={2}
+              placeholder={t('caseDetail.modulesTab.runConfig')}
+            />
+          </details>
 
           {module.files.length > 0 && (
             <div className="generated-section">
@@ -355,6 +394,7 @@ function CaseDetail() {
               <div className="generated-card-title">
                 <h3>{t('caseDetail.modulesTab.componentList')}</h3>
                 <a className="btn btn-secondary" href={casesApi.procurementUrl(id)} target="_blank" rel="noreferrer">{t('caseDetail.modulesTab.exportProcurement')}</a>
+                <a className="btn btn-secondary" href={casesApi.bomUrl(id)} target="_blank" rel="noreferrer" title={t('caseDetail.modulesTab.exportBomHint')}>{t('caseDetail.modulesTab.exportBom')}</a>
               </div>
               {components.length === 0 ? <p>{t('caseDetail.modulesTab.noComponents')}</p> : components.map((item) => (
                 <div key={item.id} className="source-row">

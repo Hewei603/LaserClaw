@@ -144,4 +144,5 @@ export const casesApi = {
   bundleUrl: (id) => `${API_BASE_URL}/api/cases/${id}/bundle`,
   moduleFileUrl: (fileId) => `${API_BASE_URL}/api/cases/module-files/${fileId}`,
   procurementUrl: (id) => `${API_BASE_URL}/api/cases/${id}/components/procurement.csv`,
+  bomUrl: (id) => `${API_BASE_URL}/api/cases/${id}/components/bom.csv`,
 };
