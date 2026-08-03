@@ -245,12 +245,19 @@ def parse_geometry(*cells: str) -> ParsedGeometry:
         geo.roc_is_flat = True
         geo.roc_mm = None
 
-    # Lens focal length: F=300mm / f=250 mm / bare F100. Sign kept (negative =
-    # diverging, e.g. "F=-99.6，R=-51.5" on a plano-concave). The lookbehind
-    # keeps the F of e.g. "HF" or "0.5F" from matching.
-    m = re.search(r"(?<![A-Za-z0-9])[Ff]\s*=?\s*(-?\d+(?:\.\d+)?)\s*(?:mm)?", text)
+    # Lens focal length: F=300mm / f=250 mm / f=50cm / f=1m / bare F100. Sign
+    # kept (negative = diverging, e.g. "F=-99.6，R=-51.5" on a plano-concave).
+    # The lookbehind keeps the F of "HF"/"0.5F" from matching; the trailing
+    # assertion keeps other units from being silently read as mm ("F 700nm" is
+    # a filter line, not a 700 mm lens — better unparsed-and-reviewed than a
+    # confidently wrong number). Bare F<n> without '=' or unit needs n ≥ 10:
+    # "F2" is a glass grade, "F100" is a lens.
+    m = re.search(r"(?<![A-Za-z0-9])[Ff]\s*(=?)\s*(-?\d+(?:\.\d+)?)\s*(mm|cm|m)?(?![A-Za-z0-9.])", text)
     if m:
-        geo.focal_length_mm = float(m.group(1))
+        scale = {"": 1.0, "mm": 1.0, "cm": 10.0, "m": 1000.0}[(m.group(3) or "").lower()]
+        focal = float(m.group(2)) * scale
+        if m.group(1) == "=" or m.group(3) or abs(focal) >= 10:
+            geo.focal_length_mm = focal
 
     # Diameter×thickness shorthand: Φ25*5mm / D=25.4*5mm (two factors, unlike
     # the crystal 3*3*5mm3 triple handled below).

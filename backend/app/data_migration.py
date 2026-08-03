@@ -8,18 +8,23 @@ silently lose all of it. The launcher now points ``DATABASE_URL`` / ``UPLOAD_DIR
 / ``VECTOR_STORE_DIR`` at ``%USERPROFILE%\\LaserClaw-Data``; this module copies the
 legacy data there the first time the new location is empty.
 
-Copy, never move: the legacy files stay behind as a de-facto backup, and because
-each item is guarded by its own "target already has data" check, a half-finished
-copy is simply resumed on the next start instead of corrupting anything.
+Copy, never move — and never through the final name: everything is copied to a
+``*.copying`` staging name first and atomically renamed into place. A user
+closing the console window mid-copy (the documented way to stop LaserClaw)
+therefore leaves only staging debris, which is deleted and re-copied on the
+next start; the "target exists → it is the source of truth" guard can never be
+fooled by a half-written file.
 """
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _SQLITE_PREFIX = "sqlite:///"
+_STAGING_SUFFIX = ".copying"
 
 
 def _sqlite_path(database_url: str) -> Path | None:
@@ -36,6 +41,14 @@ def _dir_has_content(path: Path) -> bool:
     return path.is_dir() and any(path.iterdir())
 
 
+def _clear_stale_staging(target: Path) -> None:
+    stale = target.parent / (target.name + _STAGING_SUFFIX)
+    if stale.is_dir():
+        shutil.rmtree(stale, ignore_errors=True)
+    elif stale.exists():
+        stale.unlink(missing_ok=True)
+
+
 def _copy_dir(legacy: Path, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for entry in legacy.iterdir():
@@ -44,6 +57,20 @@ def _copy_dir(legacy: Path, target: Path) -> None:
             shutil.copytree(entry, dest, dirs_exist_ok=True)
         else:
             shutil.copy2(entry, dest)
+
+
+def _atomic_dir_migrate(sources: list[Path], target: Path) -> None:
+    """Copy source dirs into a staging dir, then rename it into place."""
+    staging = target.parent / (target.name + _STAGING_SUFFIX)
+    if staging.exists():
+        shutil.rmtree(staging)
+    for src in sources:
+        _copy_dir(src, staging)
+    # The guard upstream ensured the target has no content; an empty leftover
+    # directory would still make os.replace fail on Windows, so drop it.
+    if target.is_dir() and not any(target.iterdir()):
+        target.rmdir()
+    os.replace(staging, target)
 
 
 def migrate_legacy_data(settings, repo_root: Path | None = None) -> list[str]:
@@ -59,37 +86,43 @@ def migrate_legacy_data(settings, repo_root: Path | None = None) -> list[str]:
     # Database ---------------------------------------------------------------
     target_db = _sqlite_path(settings.database_url)
     legacy_db = root / "backend" / "laserclaw.db"
-    if (
-        target_db is not None
-        and not target_db.exists()
-        and legacy_db.is_file()
-        and target_db.resolve() != legacy_db.resolve()
-    ):
-        target_db.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(legacy_db, target_db)
-        notes.append(f"已把旧数据库 {legacy_db} 复制到新的数据目录 {target_db}(旧文件保留作为备份)")
-
-    # Uploaded attachments ---------------------------------------------------
-    target_uploads = Path(settings.upload_dir)
-    for legacy_uploads in (root / "uploads", root / "backend" / "uploads"):
+    if target_db is not None:
+        _clear_stale_staging(target_db)
         if (
-            _dir_has_content(legacy_uploads)
-            and not _dir_has_content(target_uploads)
-            and target_uploads.resolve() != legacy_uploads.resolve()
+            not target_db.exists()
+            and legacy_db.is_file()
+            and target_db.resolve() != legacy_db.resolve()
         ):
-            _copy_dir(legacy_uploads, target_uploads)
-            notes.append(f"已把旧附件目录 {legacy_uploads} 复制到 {target_uploads}")
-            break
+            target_db.parent.mkdir(parents=True, exist_ok=True)
+            staging = target_db.parent / (target_db.name + _STAGING_SUFFIX)
+            shutil.copy2(legacy_db, staging)
+            os.replace(staging, target_db)
+            notes.append(f"已把旧数据库 {legacy_db} 复制到新的数据目录 {target_db}(旧文件保留作为备份)")
 
-    # RAG vector store -------------------------------------------------------
+    # Uploaded attachments — both historical locations merge into one target.
+    target_uploads = Path(settings.upload_dir)
+    _clear_stale_staging(target_uploads)
+    upload_sources = [
+        legacy for legacy in (root / "uploads", root / "backend" / "uploads")
+        if _dir_has_content(legacy) and target_uploads.resolve() != legacy.resolve()
+    ]
+    if upload_sources and not _dir_has_content(target_uploads):
+        _atomic_dir_migrate(upload_sources, target_uploads)
+        for legacy in upload_sources:
+            notes.append(f"已把旧附件目录 {legacy} 复制到 {target_uploads}")
+
+    # RAG vector store — first existing candidate only: the two locations are
+    # alternative homes of the SAME index, and merging two indexes would
+    # corrupt rather than complete it.
     target_vs = Path(settings.vector_store_dir)
+    _clear_stale_staging(target_vs)
     for legacy_vs in (root / "backend" / "vector_store", root / "vector_store"):
         if (
             _dir_has_content(legacy_vs)
             and not _dir_has_content(target_vs)
             and target_vs.resolve() != legacy_vs.resolve()
         ):
-            _copy_dir(legacy_vs, target_vs)
+            _atomic_dir_migrate([legacy_vs], target_vs)
             notes.append(f"已把旧检索索引 {legacy_vs} 复制到 {target_vs}")
             break
 

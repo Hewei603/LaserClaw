@@ -5,7 +5,7 @@ import { API_BASE_URL } from '../api/client';
 import { casesApi } from '../api/cases';
 import { knowledgeApi } from '../api/knowledge';
 import { ModuleResult, PhysicsFactsBlock } from '../components/ModuleResults';
-import ModuleConfigForm, { buildModuleConfig, configToFormValues } from '../components/ModuleConfigForm';
+import ModuleConfigForm, { buildModuleConfig, configToFormValues, OWNED_KEYS } from '../components/ModuleConfigForm';
 import { useLanguage } from '../LanguageContext';
 
 function CaseDetail() {
@@ -206,7 +206,15 @@ function CaseDetail() {
       setActionError(t('caseDetail.modulesTab.badFieldValue') + labels);
       return;
     }
-    let config = built.config;
+    // The run payload replaces the stored config wholesale, so stored keys the
+    // form doesn't own (inline power-curve data, vendor curves, hand-written
+    // extras) must ride along — otherwise this click silently deletes them.
+    const owned = new Set(OWNED_KEYS[module.module_type] || []);
+    const preserved = {};
+    Object.entries(module.config_json || {}).forEach(([key, value]) => {
+      if (!owned.has(key)) preserved[key] = value;
+    });
+    let config = { ...preserved, ...built.config };
     const text = (moduleConfigs[module.id] || '').trim();
     if (text) {
       try {
