@@ -31,6 +31,9 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 def use_mock_ai_provider(monkeypatch):
     """Keep API tests deterministic even when the app container uses OpenAI."""
     monkeypatch.setenv("AI_PROVIDER", "mock")
+    # Literature search must never hit the network in tests: the mock source
+    # returns canned records through the same service path.
+    monkeypatch.setenv("LITERATURE_PROVIDERS", "mock")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     if not os.environ.get("RUN_PGVECTOR_TESTS"):

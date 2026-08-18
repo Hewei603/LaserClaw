@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import admin, agent, attachments, case_modules, cases, collaboration, evals, generation, inventory, knowledge, versioning
+from .api import admin, agent, attachments, case_modules, cases, collaboration, evals, generation, inventory, knowledge, literature, versioning
 from .config import get_settings
 from .database import Base, engine, sync_additive_schema
 from .version import APP_VERSION
@@ -78,6 +78,7 @@ app.include_router(collaboration.router, prefix="/api/collaboration", tags=["col
 app.include_router(versioning.router, prefix="/api/versioning", tags=["versioning"])
 app.include_router(evals.router, prefix="/api/evals", tags=["evals"])
 app.include_router(inventory.router, prefix="/api/inventory", tags=["inventory"])
+app.include_router(literature.router, prefix="/api/literature", tags=["literature"])
 
 
 @app.get("/")

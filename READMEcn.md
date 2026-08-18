@@ -25,6 +25,7 @@ LaserClaw 是一个面向激光实验工作流的本地优先 **RAG Agent 工作
 - **确定性物理内核**(纯 numpy):ABCD/高斯光束腔分析与**腔型设计搜索**(按实测热透镜裕度排序)、薄膜 TMM 镀膜评估、单轴/双轴相位匹配、功率曲线阈值与斜率效率拟合(含 Findlay-Clay / Caird 腔损耗反推)。实验计划里的几何与角度**是算出来的**,不是模型编的。
 - **结构化元件库**:导入实验室元件清单(.xlsx),把镀膜/曲率/口径解析成结构化数据,按波长×功能做数据库级筛选,并针对需求逐参数判定(可用 / 需实测 / 淘汰,含非支配前沿)。腔型设计搜索只会推荐库里真有的镜子。
 - **借还与损坏台账**:借出只减**可用量**、不动工作簿里的库存数(否则下次重新导入会静默清账);人工标注的损坏与解析出的状态分开存,重新导入冲不掉;借出去的、标损坏的元件不会进匹配结果,并给出显式淘汰理由。
+- **文献检索**(三个入口:独立页面 / 案例模块 / Agent 对话):确定性检索免费免注册的 OpenAlex + arXiv,按 DOI/标题去重,状态诚实(查不到就明说,不静默返回空),支持 BibTeX 导出。结果为元数据与摘要——系统不读全文并明确声明;存档进案例的检索结果会成为计划/报告可引用的知识。
 - **可打印方案**:腔设计结果带一张横向真实比例的**摆位图**(镜面朝向、晶体位置、冷腔基模包络与束腰),整页 `Ctrl+P` 即可存成 PDF 带进实验室——矢量图,白底黑字,导航与按钮自动隐藏。
 - **结构化 AI artifact**：保存 plan、troubleshooting、report、image analysis、物理模块结果等生成内容。
 - **Prompt/workflow 版本管理**：维护 active prompt 和 workflow version，支持可复现 AI 运行。
@@ -118,12 +119,12 @@ LaserClaw 有两类检索来源：
 
 | 检查项 | 结果 | 复现命令 |
 |---|---|---|
-| 后端测试套件 | 321 passed, 2 skipped | `cd backend && py -m pytest -q` |
+| 后端测试套件 | 386 passed, 2 skipped | `cd backend && py -m pytest -q` |
 | 物理内核对拍(解析解/文献值) | 已含在上面(TMM 与独立的 `tmm` 库对拍至机器精度) | `py -m pytest tests/test_physics_*.py -q` |
 | 意图路由用例 | 57 passed | `py -m pytest tests/test_router.py -q` |
 | RAG 数据集断言 | 8 passed(37 条查询数据集) | `py -m pytest tests/eval_rag_dataset.py -q` |
 | Agent 轨迹完整性 | 7 passed | `py -m pytest tests/eval_agent_trace.py -q` |
-| API 鉴权依赖审计 | 78 条 `/api/*` 路由,0 findings | `py scripts/audit_endpoint_acl.py` |
+| API 鉴权依赖审计 | 80 条 `/api/*` 路由,0 findings | `py scripts/audit_endpoint_acl.py` |
 | 前端 lint/build | 通过 | `cd frontend && npm run lint && npm run build` |
 
 合成语料上的检索质量与延迟
@@ -387,6 +388,7 @@ py scripts\tune_retrieval_thresholds.py --dataset ..\docs\evals\private\rag_eval
 - `POST /api/inventory/loans/{loan_id}/return`
 - `GET /api/inventory/loans`
 - `PATCH /api/inventory/items/{item_id}/condition`
+- `POST /api/literature/search`
 
 ## 项目结构
 

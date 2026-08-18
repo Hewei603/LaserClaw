@@ -39,6 +39,11 @@ _GENERATE_INTENT = [
     "帮我分析", "分析一下", "分析", "拟合", "analyze", "fit",
     # selection verbs fused with their object carry intent by themselves
     "选元件", "找元件", "挑元件", "选镜", "找镜", "选晶体", "找晶体",
+    # literature verbs, fused only — bare 检索/搜索 would grant intent to
+    # messages like "搜索光谱数据" and reroute them
+    "查文献", "找文献", "搜文献", "检索文献", "文献检索", "文献调研",
+    "查论文", "找论文", "搜论文",
+    "search literature", "literature search", "find papers", "search papers",
     # English
     "generate", "create", "write", "draft", "make", "produce",
     "give me a", "prepare", "build",
@@ -47,6 +52,16 @@ _GENERATE_INTENT = [
 
 # Content type keywords — what to generate
 _CONTENT_KEYWORDS = {
+    # Checked FIRST (see _route_mode): a literature query almost always names
+    # a physics topic too ("帮我找腔体设计的论文" contains 腔体设计), so any
+    # later position loses the common case to the topic's own module. Known
+    # cost, unavoidable at every position: "帮我写实验报告,附上参考文献"
+    # routes here ("文献" ⊂ "参考文献"); the Agent tab's explicit mode
+    # dropdown is the escape hatch.
+    "literature_search": [
+        "文献", "论文", "综述", "预印本",
+        "literature", "paper", "arxiv", "preprint",
+    ],
     "plan": [
         "实验计划", "实验方案", "实验步骤", "操作步骤", "搭建方案", "实验流程",
         "plan", "protocol", "procedure", "experiment plan", "setup guide",
@@ -112,7 +127,8 @@ def _route_mode(message: str) -> str:
     if not has_intent:
         return "chat"
 
-    for mode in ["stability", "beam_profile", "spectrum", "components", "module_management",
+    for mode in ["literature_search",
+                 "stability", "beam_profile", "spectrum", "components", "module_management",
                  "cavity_design", "phase_match", "coating_tmm", "component_match", "power_curve",
                  "troubleshooting", "report", "plan"]:
         keywords = _CONTENT_KEYWORDS[mode]

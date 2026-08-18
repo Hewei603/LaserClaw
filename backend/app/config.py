@@ -113,6 +113,12 @@ class Settings(BaseSettings):
     pgvector_table: str = "knowledge_chunk_vectors"
     pgvector_dimension: int = 384
 
+    # Literature search settings (keyless sources; see app/literature/)
+    literature_providers: str = "openalex,arxiv"  # csv; also: mock
+    literature_timeout_s: float = 8.0
+    # OpenAlex "polite pool" contact — optional, improves rate limits.
+    literature_mailto: Optional[str] = None
+
     # Reranker settings
     reranker_provider: str = "none"  # none, sentence_transformers, cohere
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"

@@ -302,6 +302,7 @@ function CaseDetail() {
       coating_tmm: t('caseDetail.modulesTab.coatingTmm'),
       component_match: t('caseDetail.modulesTab.componentMatch'),
       power_curve: t('caseDetail.modulesTab.powerCurve'),
+      literature_search: t('caseDetail.modulesTab.literatureSearch'),
     };
     return labels[type] || type;
   };
@@ -328,6 +329,9 @@ function CaseDetail() {
               <option value="coating_tmm">{t('caseDetail.modulesTab.coatingTmm')}</option>
               <option value="component_match">{t('caseDetail.modulesTab.componentMatch')}</option>
             </optgroup>
+            <optgroup label={t('caseDetail.modulesTab.groupLiterature')}>
+              <option value="literature_search">{t('caseDetail.modulesTab.literatureSearch')}</option>
+            </optgroup>
             <optgroup label="—">
               <option value="components">{t('caseDetail.modulesTab.components')}</option>
             </optgroup>
@@ -345,6 +349,7 @@ function CaseDetail() {
           <p className="muted mono">{t('caseDetail.modulesTab.exPhase')}</p>
           <p className="muted mono">{t('caseDetail.modulesTab.exCoating')}</p>
           <p className="muted mono">{t('caseDetail.modulesTab.exPower')}</p>
+          <p className="muted mono">{t('caseDetail.modulesTab.exLiterature')}</p>
         </details>
       </div>
 
@@ -685,6 +690,7 @@ function CaseDetail() {
                 <option value="coating_tmm">{t('caseDetail.agentTab.mCoatingTmm')}</option>
                 <option value="component_match">{t('caseDetail.agentTab.mComponentMatch')}</option>
                 <option value="power_curve">{t('caseDetail.agentTab.mPowerCurve')}</option>
+                <option value="literature_search">{t('caseDetail.agentTab.mLiteratureSearch')}</option>
               </select>
               <button className="btn btn-primary" disabled={agentRunning} type="submit">
                 {agentRunning ? t('caseDetail.agentTab.running') : t('caseDetail.agentTab.run')}

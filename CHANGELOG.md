@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added literature search (v2.2.0) with three entries — a standalone 文献检索 page (`POST /api/literature/search`), a `literature_search` case module, and an agent chat mode — backed by one deterministic service over keyless OpenAlex + arXiv: DOI/title dedup, honest statuses (per-source failure notes, `failed` instead of silently-empty, Chinese `needs_input` naming the missing field), BibTeX export, and an explicit "metadata + abstracts only, no full texts were read" disclaimer. Archived module results index into case RAG so plans/reports can cite them. Chat queries derive the search terms deterministically from the sentence (asking words stripped) or the case's physics parameters.
+- Fixed `generated_content_id` never persisting into any module's stored `result_json`: the run endpoint mutated the same dict object it had already assigned, which SQLAlchemy's JSON column change detection cannot see.
+
 - Fixed the stale-backend deployment gap: the launcher now takes over ports held by old LaserClaw processes, `/health` reports the app version, and the frontend shows a Chinese "restart the launcher" banner on version mismatch (`tests/test_version_handshake.py` pins the three version strings together).
 - Moved launcher-run experiment data out of the code tree to `%USERPROFILE%\LaserClaw-Data`, with a one-time automatic copy of legacy in-tree data (`backend/app/data_migration.py`) and a new `Update-LaserClaw.bat` one-click updater.
 - Integrated crystal cut-angle matching into the L1 inventory evaluator (`phase_match` requirement: per-material phase-match angle vs labelled cut, three-state with 180°−θ equivalence) and added a "nonlinear crystal (cut angle)" mode to the inventory match form.

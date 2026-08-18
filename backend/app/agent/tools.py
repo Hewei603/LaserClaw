@@ -26,6 +26,7 @@ def tool_schemas() -> list[dict[str, Any]]:
         {"name": "match_components", "description": "Deterministic inventory matching: requirement spec -> per-candidate structured verdicts with dominance frontier.", "input_schema": {"required": ["surfaces"]}},
         {"name": "compute_coating_tmm", "description": "Deterministic thin-film coating evaluation (exact stack, vendor curve, or honest nominal-label archetype).", "input_schema": {"required": []}},
         {"name": "analyze_power_curve", "description": "Fit threshold + slope efficiency from measured pump/output power data; cross-series Findlay-Clay/Caird loss analysis.", "input_schema": {"required": []}},
+        {"name": "search_literature", "description": "Deterministic literature search over OpenAlex/arXiv: metadata + abstracts only, never full texts; results carry DOI/arXiv ids.", "input_schema": {"required": ["query"]}},
         {"name": "search_knowledge", "description": "Search indexed cases, attachments, and generated content.", "input_schema": {"required": ["query"]}},
         {"name": "search_similar_cases", "description": "Search case sources with similar symptoms and cavity type.", "input_schema": {"required": ["query"]}},
         {"name": "save_generated_content", "description": "Persist an Agent artifact.", "input_schema": {"required": ["case_id", "content_type", "content"]}},
@@ -146,6 +147,7 @@ def create_case_module_payload(db: Session, case: ExperimentCase, module_type: s
         "coating_tmm": "Coating TMM analysis",
         "component_match": "Component matching (inventory)",
         "power_curve": "Power transfer curve (threshold & slope)",
+        "literature_search": "Literature search",
     }
     normalized_type = "components" if module_type == "module_management" else module_type
     module = CaseModule(

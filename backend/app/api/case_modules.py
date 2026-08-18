@@ -1,6 +1,7 @@
 """Case module API routes."""
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import math
@@ -25,6 +26,7 @@ from ..database import get_db
 from ..knowledge.ingestion import create_generated_content_source
 from ..models import CaseComponentItem, CaseModule, CaseModuleFile, ExperimentCase, GeneratedContent
 from ..inventory.evaluator import evaluate_candidates
+from ..literature import run_literature_search
 from ..observability.audit import record_audit
 from ..physics.toolkit import run_cavity_design, run_coating_tmm, run_phase_match
 from ..schemas import (
@@ -51,6 +53,7 @@ MODULE_LABELS = {
     "coating_tmm": "Coating TMM analysis",
     "component_match": "Component matching (inventory)",
     "power_curve": "Power transfer curve (threshold & slope)",
+    "literature_search": "Literature search",
 }
 MODULE_EXTENSIONS = {".zip", ".csv", ".txt", ".tsv", ".json", ".jpg", ".jpeg", ".png", ".bmp", ".pdf", ".npy"}
 
@@ -723,6 +726,14 @@ async def run_case_module(
         result = evaluate_candidates(db, merged)
     elif module.module_type == "power_curve":
         result = _run_power_curve(module, db, config)
+    elif module.module_type == "literature_search":
+        case = _get_case_or_404(db, module.case_id)
+        # Plain dict only across the thread boundary — never the ORM object or
+        # the Session. to_thread because this is the app's only third-party
+        # network call and must not block the event loop for its ~8s timeout.
+        case_params = {"title": case.title, "goal": case.goal,
+                       "parameters": case.parameters or {}}
+        result = await asyncio.to_thread(run_literature_search, config, case_params)
     elif module.module_type == "components":
         case = _get_case_or_404(db, module.case_id)
         existing = db.query(CaseComponentItem).filter(CaseComponentItem.module_id == module.id).count()
@@ -737,7 +748,10 @@ async def run_case_module(
     module.status = "completed" if result.get("status") == "completed" else result.get("status", "failed")
     if payload.save_generated_content:
         generated = _save_module_generated_content(db, module, result)
-        result["generated_content_id"] = generated.id
+        # A NEW dict, not an in-place mutation: the helper's flush already
+        # serialized the old object, and reassigning the SAME object is not a
+        # change SQLAlchemy can see — the id would silently never persist.
+        result = {**result, "generated_content_id": generated.id}
         module.result_json = result
     record_audit(db, action="case_module.run", resource_type="case_module", resource_id=str(module.id))
     db.commit()

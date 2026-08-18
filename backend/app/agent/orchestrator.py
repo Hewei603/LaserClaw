@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..knowledge.ingestion import create_generated_content_source
 from ..inventory.evaluator import available_mirror_rocs, evaluate_candidates
+from ..literature import run_literature_search
 from ..models import AgentStep, AgentTask, CaseModule, ExperimentCase, GeneratedContent
 from ..observability.audit import record_audit
 from ..observability.usage import apply_usage_to_generated
@@ -32,7 +33,7 @@ from .tools import (
 
 logger = logging.getLogger(__name__)
 PHYSICS_MODES = {"cavity_design", "phase_match", "coating_tmm"}
-MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management", "component_match", "power_curve"} | PHYSICS_MODES
+MODULE_MODES = {"stability", "beam_profile", "spectrum", "components", "module_management", "component_match", "power_curve", "literature_search"} | PHYSICS_MODES
 
 
 async def create_and_run_task(
@@ -288,6 +289,22 @@ def _run_module_task(
             "match_components",
             {"module_id": module.id, "requirement": merged_config},
             lambda: evaluate_candidates(db, merged_config),
+        )
+        module.status = output.get("status", "failed")
+        module.result_json = output
+    elif module.module_type == "literature_search":
+        merged_config = dict(module.config_json or {})
+        case_params = {"title": case.title, "goal": case.goal,
+                       "parameters": case.parameters or {}} if case else None
+        # goal is the user's chat sentence: a fresh module has no query yet,
+        # so the service derives one from it (asking words stripped).
+        output = record_tool_call(
+            db,
+            task,
+            steps[2].id,
+            "search_literature",
+            {"module_id": module.id, "config": merged_config, "goal": goal},
+            lambda: run_literature_search(merged_config, case_params, goal),
         )
         module.status = output.get("status", "failed")
         module.result_json = output

@@ -44,7 +44,7 @@ LaserClaw 是一个面向激光实验室的本地优先(local-first)实验管理
 | 库存 | `backend/app/inventory/` | L0 解析/导入 + L1 评估(见 §6) |
 | Provider | `backend/app/providers/` | LLM 抽象:mock / openai / anthropic |
 | 模型 | `backend/app/models/` | SQLAlchemy ORM(见 §8) |
-| 迁移 | `backend/alembic/versions/` | 线性迁移链 0001→0009 |
+| 迁移 | `backend/alembic/versions/` | 线性迁移链 0001→0010 |
 | 观测 | `backend/app/observability/` | 审计日志、token 用量 |
 | 评测 | `backend/app/evals/` | RAG 检索评测指标与验收门 |
 | 测试 | `backend/tests/` | 300+ 用例(见 §9) |
@@ -66,6 +66,7 @@ LaserClaw 是一个面向激光实验室的本地优先(local-first)实验管理
 | `/api/knowledge` | `api/knowledge.py` | 全局知识源上传、治理状态、`/search` 检索(带 ACL 过滤) |
 | `/api/agent` | `api/agent.py` | **聊天入口**(`/chat`,含 `_route_mode` 意图路由)、任务(`/tasks`)、会话/记忆 |
 | `/api/inventory` | `api/inventory.py` | **元件库**:`/import`(xlsx 导入)、`/items`(类型化过滤)、`/match`(L1 匹配) |
+| `/api/literature` | `api/literature.py` | **文献检索**独立端点(无案例快查);案例模块与 Agent 路径共用同一 `literature/service.py` |
 | `/api/collaboration` | `api/collaboration.py` | 用户/项目/组/成员管理(admin) |
 | `/api/versioning` | `api/versioning.py` | Prompt/Workflow 版本管理 |
 | `/api/evals` | `api/evals.py` | RAG 检索评测运行(reviewer 权限 + 租户过滤) |
@@ -141,6 +142,27 @@ oracle(GPL,已 gitignore,绝不拷贝)。
 
 判定档案示例字段:`hard_violations / parameters.coatings[].status / unknowns / must_measure / frontier`。
 "maybe_usable" 一律注明依据(原型阻带区间)并列入实测清单——**标签不是曲线,系统不假装知道**。
+
+---
+
+## 6.5 文献检索层(`backend/app/literature/`)
+
+LLM 编造参考文献是经典失效模式,所以文献条目与物理数值同一待遇:**全部来自确定性层**,
+LLM 永远不产生一条文献。
+
+| 文件 | 内容 |
+|---|---|
+| `literature/records.py` | `PaperRecord` 归一化记录;去重(DOI 归一化优先,无 DOI 按归一化标题,合并保留更全字段);BibTeX 与纯文本引用行 |
+| `literature/providers.py` | OpenAlex(期刊元数据+被引数+倒排索引摘要重建)与 arXiv(Atom XML 预印本)适配器,均免 key;`mock` 源供测试/演示;HTTP 走模块级接缝,测试 monkeypatch 后零联网 |
+| `literature/service.py` | `run_literature_search`:查询词优先级 config.query > 聊天原句剥停用词 > 案例物理参数拼词 > needs_input;线程池并发扇出、逐源异常隔离(≥1 成功=completed+失败注记,全失败=failed,绝不空结果假完成);去重、排序(relevance/citations/year)、max_results 硬顶 50 |
+
+三个入口共用同一 service:独立页(`/api/literature/search`)、案例模块(`literature_search`,
+结果经 `create_generated_content_source` 自动索引进案例 RAG——后续计划/报告可引用)、Agent
+模式(聊天路由关键词在 `_route_mode` 列表**最前**,因为文献查询几乎必带物理名词,靠后必被
+稳定性/腔设计等模块截胡;代价与逃生门见 `api/agent.py` 注释)。
+
+**诚实边界**:检索到的是元数据+摘要,系统未读任何全文;结果自带中文声明,界面与打印同样显示。
+中文文献(知网/万方)无公开合法 API,不做爬虫;后续以 BibTeX/RIS 手动导入补足。
 
 ---
 
@@ -222,7 +244,7 @@ Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `a
 
 ---
 
-## 9. 测试与质量门(`backend/tests/`,共 323 用例,321 passed + 2 skipped)
+## 9. 测试与质量门(`backend/tests/`,共 388 用例,386 passed + 2 skipped)
 
 | 文件 | 覆盖 |
 |---|---|
@@ -233,6 +255,7 @@ Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `a
 | `test_physics_modules.py` | 物理工具经 REST 模块 + Agent 任务 + 聊天路由 |
 | `test_power_curve.py` | 功率曲线拟合、跨曲线 Findlay-Clay/Caird、API 往返 |
 | `test_inventory.py` | L0 语法解析、导入、SQL 过滤、L1 三态/硬门/前沿、Agent 路径 |
+| `test_literature.py` | 解析器吃录制样本(OpenAlex 倒排摘要重建、arXiv 命名空间 Atom)、去重不变量、三态诚实性(全失败/单失败/无查询词)、三入口端到端、路由正负例与既有路由回归、RAG 闭环(存档结果可被检索) |
 | `test_inventory_loans.py` | 借出只减可用量不动库存、超借拒绝、归还留痕、人工损坏标记扛住重新导入、有未归还时拒绝重新导入、批次删除级联 |
 | `test_beam_envelope.py` | 摆位图包络的两个易错约定:物理 z 轴、晶体内外光斑连续(w 连续、只有发散角变) |
 | `test_schema_upgrade.py` | `create_all` 老库升级:遍历**全部**模型表补列补索引;NOT NULL 列不伪造默认值而是告警 |
@@ -260,6 +283,7 @@ Provider 抽象:`providers/base.py`(ABC)+ `providers/mock.py` / `openai.py` / `a
 | `pages/CaseDetail.jsx` | 案例详情:概览(结构化参数表)、生成物(分节渲染 + 原始 JSON 折叠)、知识检索、**模块**(分组下拉 + 每模块独立参数框 + 类型化结果)、Agent 任务轨迹、附件;统一错误横幅 |
 | `components/ModuleResults.jsx` | **类型化结果渲染**:功率曲线 SVG(坐标刻度 + 实测点 + 阈值标记)、多曲线对比与腔损耗、相位匹配表、镀膜三态色块、**腔摆位图(横向真实比例的 SVG:镜面曲率朝向、晶体位置与厚度、束腰位置 + 冷腔基模包络)**、腔设计摆位表、元件匹配前沿 |
 | `print.css` | `@media print`:隐藏导航/按钮、强制白底黑字、SVG 描边改深色、卡片与表格 `break-inside: avoid`。浏览器「打印 → 另存为 PDF」即得可带进实验室的纸质方案(零依赖,矢量图,中文字体走系统) |
+| `pages/LiteraturePage.jsx` | 文献检索独立页:表单 → `/api/literature/search` → 复用 `LiteratureSearchResult`;「存入案例」走现有建模块+运行接口 |
 | `pages/InventoryPage.jsx` | 元件库:xlsx 导入、波长×功能 SQL 级筛选、名称搜索、待复核队列、需求匹配、**借出/归还与损坏标记**(数量列在有借出时显示 `可用 / 总数`) |
 | `pages/AgentWorkspace.jsx` | Agent 对话:路由结果 / 任务 / 引用 pill |
 | `api/client.js` | axios 封装 + HTTP 状态码中文提示 |

@@ -17,6 +17,7 @@ MODE_LABELS = {
     "coating_tmm": "镀膜评估",
     "component_match": "元件匹配",
     "power_curve": "功率曲线",
+    "literature_search": "文献检索",
 }
 
 
@@ -28,7 +29,8 @@ def mode_label(mode: str) -> str:
 def build_plan(mode: str) -> list[dict[str, str]]:
     """Return a minimal multi-step plan for the requested Agent mode."""
     if mode in {"stability", "beam_profile", "spectrum", "components", "module_management",
-                "cavity_design", "phase_match", "coating_tmm", "component_match", "power_curve"}:
+                "cavity_design", "phase_match", "coating_tmm", "component_match", "power_curve",
+                "literature_search"}:
         return [
             {
                 "title": "读取案例与模块上下文",

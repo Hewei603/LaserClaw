@@ -38,6 +38,12 @@ const FIELD_SPECS = {
   stability: [
     { key: 'roi', kind: 'text', label: 'roi', placeholder: '100,200,300,80' },
   ],
+  literature_search: [
+    { key: 'query', kind: 'text', label: 'litQuery', placeholder: 'Nd:YAG passive Q-switching' },
+    { key: 'year_from', kind: 'number', label: 'litYearFrom', placeholder: '2015' },
+    { key: 'max_results', kind: 'number', label: 'litMaxResults', placeholder: '20' },
+    { key: 'sources', kind: 'select', label: 'litSources', options: ['openalex,arxiv', 'openalex', 'arxiv'] },
+  ],
 };
 
 const HINT_KEYS = {
@@ -46,6 +52,7 @@ const HINT_KEYS = {
   coating_tmm: 'hintCoating',
   power_curve: 'hintPower',
   stability: 'hintStability',
+  literature_search: 'hintLiterature',
 };
 
 const FLAT_WORDS = ['flat', 'inf', 'infinite', 'plane', '平', '平镜', '平面', '无限'];
@@ -62,6 +69,7 @@ export const OWNED_KEYS = {
   coating_tmm: ['nominal', 'query_wavelengths_nm', 'aoi_deg'],
   power_curve: ['output_coupler_T_pct', 'label'],
   stability: ['roi'],
+  literature_search: ['query', 'year_from', 'max_results', 'sources'],
 };
 
 // Laser students write numbers with units ("300mm", "1064 nm", "5°"). Strip a
@@ -143,6 +151,13 @@ export function buildModuleConfig(moduleType, values = {}) {
     if ((values.label || '').trim()) config.label = values.label.trim();
   } else if (moduleType === 'stability') {
     if ((values.roi || '').trim()) config.roi = values.roi.trim();
+  } else if (moduleType === 'literature_search') {
+    if ((values.query || '').trim()) config.query = values.query.trim();
+    const yearFrom = num('year_from', 'litYearFrom');
+    if (yearFrom !== null) config.year_from = yearFrom;
+    const maxResults = num('max_results', 'litMaxResults');
+    if (maxResults !== null) config.max_results = maxResults;
+    if (values.sources) config.sources = values.sources;
   }
   return { config, errors };
 }
@@ -187,6 +202,11 @@ export function configToFormValues(moduleType, config = {}) {
     put('label', config.label);
   } else if (moduleType === 'stability') {
     put('roi', config.roi);
+  } else if (moduleType === 'literature_search') {
+    put('query', config.query);
+    put('year_from', config.year_from);
+    put('max_results', config.max_results);
+    put('sources', config.sources);
   }
   return values;
 }

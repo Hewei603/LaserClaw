@@ -8,4 +8,4 @@ else — including nothing at all, which is what pre-2.1 backends report.
 ``tests/test_version_handshake.py`` asserts the two files agree.
 """
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"

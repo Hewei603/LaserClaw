@@ -25,6 +25,7 @@ LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows*
 - **Deterministic physics kernel** (pure numpy): ABCD/Gaussian cavity analysis and design search with a measured thermal-lens margin, thin-film TMM coating evaluation, uniaxial/biaxial phase matching, and power-curve threshold/slope fits with Findlay-Clay and Caird cavity-loss analysis. Experiment plans are generated **around these computed numbers**, not around numbers the model invented.
 - **Structured component inventory**: import a lab component workbook (.xlsx), filter by wavelength/function at the coating-spec level, and evaluate candidates parameter by parameter against a requirement spec (usable / must-measure / rejected, with a dominance frontier). Cavity design searches are constrained to mirrors the lab actually owns.
 - **Loan and damage tracking**: borrowing reduces *availability* and never the workbook's stock number (which every re-import overwrites), a human damage verdict is stored apart from the parsed one so re-import cannot resurrect a chipped mirror, and borrowed or damaged items drop out of matching with an explicit rejection reason.
+- **Literature search** (three entries: standalone page, case module, agent chat): deterministic queries against keyless OpenAlex + arXiv, DOI/title dedup, honest statuses (no silent empty results), BibTeX export. Results are metadata + abstracts — the system never reads full texts and says so; archived module results become case knowledge the plan/report generation can cite.
 - **Printable plans**: cavity design results include a to-scale **layout diagram** (mirror orientation, crystal position, cold-cavity mode envelope and waist); `Ctrl+P` on any case page exports a lab-ready PDF — vector graphics, black on white, navigation and controls hidden.
 - **Structured AI artifacts** saved as versioned generated content.
 - **Prompt/workflow versioning** for reproducible AI runs.
@@ -121,12 +122,12 @@ works end to end; they are **not** a claim about production-scale accuracy.
 
 | Check | Result | Reproduce with |
 |---|---|---|
-| Backend test suite | 321 passed, 2 skipped | `cd backend && py -m pytest -q` |
+| Backend test suite | 386 passed, 2 skipped | `cd backend && py -m pytest -q` |
 | Physics kernel vs analytic/literature | included above (TMM cross-checked against the independent `tmm` package to machine precision) | `py -m pytest tests/test_physics_*.py -q` |
 | Intent-routing cases | 57 passed | `py -m pytest tests/test_router.py -q` |
 | RAG dataset assertions | 8 passed (37-query dataset) | `py -m pytest tests/eval_rag_dataset.py -q` |
 | Agent trace completeness | 7 passed | `py -m pytest tests/eval_agent_trace.py -q` |
-| API auth dependency audit | 78 `/api/*` routes checked, 0 findings | `py scripts/audit_endpoint_acl.py` |
+| API auth dependency audit | 80 `/api/*` routes checked, 0 findings | `py scripts/audit_endpoint_acl.py` |
 | Frontend lint/build | Passed | `cd frontend && npm run lint && npm run build` |
 
 Retrieval quality and latency on the synthetic corpus
@@ -391,6 +392,7 @@ Core endpoints:
 - `POST /api/inventory/loans/{loan_id}/return`
 - `GET /api/inventory/loans`
 - `PATCH /api/inventory/items/{item_id}/condition`
+- `POST /api/literature/search`
 
 ## Project Structure
 

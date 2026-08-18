@@ -369,6 +369,68 @@ export function ComponentMatchResult({ result }) {
   );
 }
 
+export function LiteratureSearchResult({ result }) {
+  const { t } = useLanguage();
+  if (!result.papers) return null;
+  const downloadBibtex = () => {
+    // Client-side .bib assembly: entries were rendered by the backend from
+    // real index records, never by a model.
+    const blob = new Blob([result.papers.map((p) => p.bibtex).filter(Boolean).join('\n\n')],
+      { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'laserclaw_references.bib';
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+  return (
+    <div className="generated-section">
+      {result.summary && <p className="result-summary">{result.summary}</p>}
+      {(result.source_errors || []).map((err) => (
+        <div key={err} className="disclaimer">{err}</div>
+      ))}
+      {result.papers.length > 0 && (
+        <button type="button" className="btn btn-secondary no-print" onClick={downloadBibtex}>
+          {t('caseDetail.modulesTab.litExportBibtex')}
+        </button>
+      )}
+      {result.papers.map((paper) => (
+        <div key={paper.doi || paper.arxiv_id || paper.title} className="source-row">
+          <div>
+            <strong>
+              {paper.url
+                ? <a href={paper.url} target="_blank" rel="noreferrer">{paper.title}</a>
+                : paper.title}
+            </strong>
+            <p className="muted">
+              {(paper.authors || []).slice(0, 3).join(', ')}
+              {(paper.authors || []).length > 3 ? t('caseDetail.modulesTab.litEtAl') : ''}
+            </p>
+            {paper.abstract && (
+              <details>
+                <summary className="muted">{t('caseDetail.modulesTab.litAbstract')}</summary>
+                <p className="muted">{paper.abstract}</p>
+              </details>
+            )}
+          </div>
+          <div className="loan-cell">
+            {paper.year && <span className="meta-pill">{paper.year}</span>}
+            {paper.venue && <span className="meta-pill">{paper.venue}</span>}
+            {paper.cited_by != null && (
+              <span className="meta-pill">{t('caseDetail.modulesTab.litCitedBy')} {paper.cited_by}</span>
+            )}
+            <span className="meta-pill">{paper.source}</span>
+            {paper.pdf_url && (
+              <a className="meta-pill" href={paper.pdf_url} target="_blank" rel="noreferrer">PDF</a>
+            )}
+          </div>
+        </div>
+      ))}
+      {result.disclaimer && <div className="disclaimer">{result.disclaimer}</div>}
+    </div>
+  );
+}
+
 export function ModuleResult({ moduleType, result, showComparison = true }) {
   // needs_input AND failed both carry their explanation in `message` — a
   // failed run must show WHY, not just a status badge over an empty card.
@@ -385,6 +447,7 @@ export function ModuleResult({ moduleType, result, showComparison = true }) {
   if (moduleType === 'phase_match') return <PhaseMatchResult result={result} />;
   if (moduleType === 'coating_tmm') return <CoatingTmmResult result={result} />;
   if (moduleType === 'component_match') return <ComponentMatchResult result={result} />;
+  if (moduleType === 'literature_search') return <LiteratureSearchResult result={result} />;
   return result.summary ? <p className="result-summary">{result.summary}</p> : null;
 }
 
