@@ -7,6 +7,7 @@ import { knowledgeApi } from '../api/knowledge';
 import { ModuleResult, PhysicsFactsBlock } from '../components/ModuleResults';
 import ModuleConfigForm, { buildModuleConfig, configToFormValues, OWNED_KEYS } from '../components/ModuleConfigForm';
 import { useLanguage } from '../LanguageContext';
+import ExperimentWorkbench from '../components/ExperimentWorkbench';
 
 function CaseDetail() {
   const { id } = useParams();
@@ -14,13 +15,13 @@ function CaseDetail() {
   const { t, te } = useLanguage();
 
   const tabs = [
+    ['plan', 'Agent 工作区'],
     ['overview', t('caseDetail.tabs.overview')],
-    ['plan', t('caseDetail.tabs.plan')],
     ['troubleshooting', t('caseDetail.tabs.troubleshooting')],
     ['report', t('caseDetail.tabs.report')],
     ['knowledge', t('caseDetail.tabs.knowledge')],
     ['modules', t('caseDetail.tabs.modules')],
-    ['agent', t('caseDetail.tabs.agent')],
+    ['agent', '旧版模块助手'],
     ['attachments', t('caseDetail.tabs.attachments')],
   ];
   const caseId = Number(id);
@@ -32,7 +33,7 @@ function CaseDetail() {
   const [modules, setModules] = useState([]);
   const [components, setComponents] = useState([]);
   const [tasks, setTasks] = useState([]);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('plan');
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState({});
   const [error, setError] = useState(null);
@@ -98,6 +99,17 @@ function CaseDetail() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const refreshArtifacts = async () => {
+    const [updatedCase, contents] = await Promise.all([casesApi.get(id), casesApi.getGeneratedContents(id)]);
+    const organized = {};
+    contents.forEach(item => {
+      organized[item.content_type] = organized[item.content_type] || [];
+      organized[item.content_type].push(item);
+    });
+    setCaseData(updatedCase);
+    setGeneratedContents(organized);
   };
 
   const latest = (type) => {
@@ -591,6 +603,15 @@ function CaseDetail() {
 
       {activeTab === 'overview' && (
         <div className="grid-2">
+          {latest('optical_project') && <section className="card case-current-project">
+            <div className="wb-row"><h2 className="card-title">当前光学工程 · #{latest('optical_project').id}</h2><button className="btn btn-secondary" onClick={() => setActiveTab('plan')}>前往 Agent 工作区</button></div>
+            <h3>{latest('optical_project').content.project.title}</h3>
+            <p>{latest('optical_project').content.change_note}</p>
+            <p className="field-note">此处为最新保存的计算模型，按该版本的假设解释；尚不能作为实测光路或已出光的证明。下方保留原始案例记录，后续更正以最新工程及对话为依据。</p>
+            <div className="table-scroll"><table className="mini-table"><thead><tr><th>光学元件 / 传播段</th><th>物理长度 / mm</th><th>折射率 n</th><th>曲率或焦距 / mm</th></tr></thead><tbody>{latest('optical_project').content.project.system.elements.map((element, index) => <tr key={element.uid || index}>
+              <td>{element.name}</td><td>{element.length_mm || 0}</td><td>{element.n || 1}</td><td>{element.kind === 'mirror' ? element.radius_mm == null ? '平面' : 'R=' + element.radius_mm : element.kind === 'lens' ? '空气等效 f=' + element.focal_mm : '—'}</td>
+            </tr>)}</tbody></table></div>
+          </section>}
           <div className="card">
             <h2 className="card-title">{t('caseDetail.overview.basicInfo')}</h2>
             <p><strong>{t('caseDetail.overview.desc')}</strong>{caseData.description || t('caseDetail.overview.none')}</p>
@@ -605,7 +626,7 @@ function CaseDetail() {
           </div>
           <div className="card">
             <h2 className="card-title">{t('caseDetail.overview.paramsSymptoms')}</h2>
-            <h3>{t('caseDetail.overview.parameters')}</h3>
+            <details open={!latest('optical_project') || undefined}><summary>{latest('optical_project') ? '原始案例参数（保留记录）' : t('caseDetail.overview.parameters')}</summary>
             {Object.keys(caseData.parameters || {}).length === 0 ? <p className="muted">-</p> : (
               <table className="mini-table">
                 <tbody>
@@ -614,7 +635,7 @@ function CaseDetail() {
                   ))}
                 </tbody>
               </table>
-            )}
+            )}</details>
             <h3>{t('caseDetail.overview.symptoms')}</h3>
             <div className="stat-row">
               {(caseData.symptoms || []).length === 0 ? <p className="muted">-</p>
@@ -627,7 +648,7 @@ function CaseDetail() {
         </div>
       )}
 
-      {activeTab === 'plan' && renderGenerated('plan')}
+      {activeTab === 'plan' && <ExperimentWorkbench key={id} caseData={caseData} onArtifactsChanged={refreshArtifacts} />}
       {activeTab === 'troubleshooting' && renderGenerated('troubleshooting')}
       {activeTab === 'report' && renderGenerated('report')}
 

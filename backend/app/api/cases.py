@@ -29,7 +29,7 @@ def get_case_or_404(case_id: int, db: Session) -> ExperimentCase:
 
 
 @router.post("", response_model=ExperimentCaseResponse, status_code=status.HTTP_201_CREATED)
-async def create_case(
+def create_case(
     case_data: ExperimentCaseCreate,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
@@ -91,7 +91,7 @@ async def get_case(case_id: int, db: Session = Depends(get_db), principal: Princ
 
 
 @router.put("/{case_id}", response_model=ExperimentCaseResponse)
-async def update_case(
+def update_case(
     case_id: int,
     case_data: ExperimentCaseUpdate,
     db: Session = Depends(get_db),

@@ -20,12 +20,14 @@ from .guardrails import assess_risk
 from .planner import build_plan
 from .tools import (
     get_case_payload,
+    saved_project_physics,
     create_case_module_payload,
     generate_component_items_payload,
     list_attachments_payload,
     list_case_modules_payload,
     list_generated_contents_payload,
     record_tool_call,
+    record_async_tool_call,
     run_physics_tool_payload,
     save_generated_content_payload,
     search_payload,
@@ -104,7 +106,7 @@ async def create_and_run_task(
         if mode in MODULE_MODES:
             if case is None:
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A case_id is required to run a module task")
-            content = _run_module_task(db, task, steps, case, mode, goal, retrieval)
+            content = await _run_module_task(db, task, steps, case, mode, goal, retrieval)
             generated = GeneratedContent(
                 case_id=case.id,
                 content_type=f"module_{content['module_type']}",
@@ -133,9 +135,20 @@ async def create_and_run_task(
             return task
 
         try:
+            generation_context = dict(extra_context or {})
+            generation_context.update(retrieval)
+            # Chat supplies history/memory, but this task's retrieval is the
+            # authoritative evidence set also persisted on its artifact.
+            generation_context.update(
+                retrieved_knowledge=retrieval["results"],
+                retrieval_confidence=retrieval["confidence"],
+                retrieval_no_answer=retrieval["no_answer"],
+                retrieval_max_score=retrieval["max_score"],
+                retrieval_message=retrieval["message"],
+            )
             content = await _generate_artifact(
                 mode, case_payload, goal,
-                extra_context=extra_context or retrieval,
+                extra_context=generation_context,
                 available_rocs=available_mirror_rocs(db) if mode == "plan" else None,
             )
         except HTTPException:
@@ -151,7 +164,11 @@ async def create_and_run_task(
         content["risk_level"] = risk_level
         if require_citations:
             content["citations"] = retrieval["citations"]
-            content["confidence"] = "medium" if retrieval["citations"] else "low"
+            content["confidence"] = retrieval["confidence"]
+            content["retrieval"] = {
+                "run_id": retrieval["retrieval_run_id"], "no_answer": retrieval["no_answer"],
+                "max_score": retrieval["max_score"], "message": retrieval["message"],
+            }
         steps[2].status = "completed"
         steps[2].result_summary = f"Created {mode} draft."
 
@@ -203,7 +220,7 @@ async def create_and_run_task(
         raise
 
 
-def _run_module_task(
+async def _run_module_task(
     db: Session,
     task: AgentTask,
     steps: list[AgentStep],
@@ -267,13 +284,13 @@ def _run_module_task(
     elif module.module_type in PHYSICS_MODES:
         # Deterministic physics compute: case parameters overlaid by module config.
         merged_config = {**(case.parameters or {}), **(module.config_json or {})}
-        output = record_tool_call(
+        output = await record_async_tool_call(
             db,
             task,
             steps[2].id,
             f"compute_{module.module_type}",
             {"module_id": module.id, "config": merged_config},
-            lambda: run_physics_tool_payload(module.module_type, merged_config),
+            lambda: asyncio.to_thread(run_physics_tool_payload, module_type, merged_config),
         )
         module.status = output.get("status", "failed")
         module.result_json = output
@@ -298,13 +315,13 @@ def _run_module_task(
                        "parameters": case.parameters or {}} if case else None
         # goal is the user's chat sentence: a fresh module has no query yet,
         # so the service derives one from it (asking words stripped).
-        output = record_tool_call(
+        output = await record_async_tool_call(
             db,
             task,
             steps[2].id,
             "search_literature",
             {"module_id": module.id, "config": merged_config, "goal": goal},
-            lambda: run_literature_search(merged_config, case_params, goal),
+            lambda: asyncio.to_thread(run_literature_search, merged_config, case_params, goal),
         )
         module.status = output.get("status", "failed")
         module.result_json = output
@@ -373,10 +390,12 @@ async def _generate_artifact(
         # Same inventory-constrained search as the REST path, so the two never
         # disagree about the recommended cavity. The caller supplies the mirror
         # list because only it holds the db session.
-        physics = await asyncio.to_thread(
-            compute_case_physics, payload.get("parameters"),
-            available_rocs=available_rocs,
-        )
+        physics = saved_project_physics(payload)
+        if physics is None:
+            physics = await asyncio.to_thread(
+                compute_case_physics, payload.get("parameters"),
+                available_rocs=available_rocs,
+            )
         payload["computed_physics"] = physics
     if mode == "troubleshooting":
         return await provider.generate_troubleshooting(payload.get("symptoms", []), payload)

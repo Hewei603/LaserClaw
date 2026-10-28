@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..auth.acl import assert_case_edit, assert_case_view
 from ..auth.security import Principal, get_current_principal
+from ..agent.tools import get_case_payload, saved_project_physics
 from ..database import get_db
 from ..knowledge.ingestion import create_generated_content_source
 from ..knowledge.retrieval import results_to_citations, search_case_and_global_knowledge
@@ -34,14 +35,7 @@ def _get_case_or_404(case_id: int, db: Session) -> ExperimentCase:
 
 
 def _full_case_data(case: ExperimentCase, *, physics: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = {
-        "title": case.title,
-        "description": case.description,
-        "cavity_type": case.cavity_type,
-        "goal": case.goal,
-        "parameters": case.parameters,
-        "symptoms": case.symptoms,
-    }
+    data = get_case_payload(case)
     if physics is not None:
         # Deterministic kernel first: the model writes prose around these numbers
         # instead of inventing its own geometry.
@@ -69,28 +63,47 @@ async def _run_generation(content_type: str, work: Awaitable[dict[str, Any]]) ->
         ) from exc
 
 
-def _augment_with_rag(case: ExperimentCase, content_type: str, content: dict[str, Any], request: GenerateRequest, db: Session) -> None:
+def _prepare_rag(case: ExperimentCase, content_type: str, case_data: dict[str, Any], request: GenerateRequest, db: Session) -> dict[str, Any]:
+    """Retrieve once, BEFORE generation; save precisely the evidence sent in."""
     if not request.use_rag:
-        return
+        return {}
     run, results = search_case_and_global_knowledge(
         db,
         query=_query_for(case, content_type),
         case_id=case.id,
         top_k=request.top_k,
     )
-    content["citations"] = results_to_citations(results)
-    content["confidence"] = run.confidence or ("medium" if results else "low")
-    content["retrieval"] = {
+    retrieval = {
         "run_id": run.id,
         "max_score": round(run.max_score or 0.0, 4),
         "no_answer": bool(run.no_answer),
         "message": (run.filters_json or {}).get("low_confidence_message"),
     }
-    if run.no_answer:
-        content["missing_information"] = [
-            (run.filters_json or {}).get("low_confidence_message")
-            or "No matching knowledge source was found; review attachments and case history."
-        ]
+    metadata = {
+        "citations": results_to_citations(results),
+        "confidence": run.confidence or "low",
+        "retrieval": retrieval,
+    }
+    case_data["retrieved_knowledge"] = [result.model_dump() for result in results]
+    case_data["retrieval_context"] = metadata
+    case_data["evidence_instructions"] = (
+        "Use the retrieved evidence when relevant and cite its source title. "
+        "Apply global lab rules before case-specific suggestions. "
+        "If retrieval.no_answer is true, state that supporting evidence is insufficient; "
+        "do not present a retrieved source as proof of an unsupported claim. "
+        "Distinguish recorded measurements from hypotheses."
+    )
+    return metadata
+
+
+def _attach_retrieval(content: dict[str, Any], metadata: dict[str, Any]) -> None:
+    content.update(metadata)
+    if metadata.get("retrieval", {}).get("no_answer"):
+        missing = content.get("missing_information") or []
+        if not isinstance(missing, list):
+            missing = [missing]
+        message = metadata["retrieval"]["message"] or "No matching evidence was found; review the source documents."
+        content["missing_information"] = [*missing, message] if message not in missing else missing
 
 
 def _save_generated_content(
@@ -137,13 +150,18 @@ async def generate_plan(
     provider = get_ai_provider()
     # The cavity search is unbounded, user-controlled CPU work: compute it ONCE
     # and off the event loop so one case cannot stall the whole server.
-    rocs = available_mirror_rocs(db)
-    physics = await asyncio.to_thread(compute_case_physics, case.parameters, available_rocs=rocs)
+    case_data = _full_case_data(case)
+    physics = saved_project_physics(case_data)
+    if physics is None:
+        rocs = available_mirror_rocs(db)
+        physics = await asyncio.to_thread(compute_case_physics, case.parameters, available_rocs=rocs)
+    case_data["computed_physics"] = physics
+    retrieval = _prepare_rag(case, "plan", case_data, request, db)
     content, latency_ms = await _run_generation(
-        "plan", provider.generate_plan(_full_case_data(case, physics=physics))
+        "plan", provider.generate_plan(case_data)
     )
     content["computed_physics"] = physics
-    _augment_with_rag(case, "plan", content, request, db)
+    _attach_retrieval(content, retrieval)
     return _save_generated_content(case_id, "plan", content, db, latency_ms=latency_ms)
 
 
@@ -157,10 +175,11 @@ async def generate_troubleshooting(
     """Generate troubleshooting advice with retrieved context citations."""
     case = _get_case_or_404(case_id, db)
     assert_case_edit(db, case, principal)
-    case_data = {"title": case.title, "cavity_type": case.cavity_type, "parameters": case.parameters}
+    case_data = _full_case_data(case)
+    retrieval = _prepare_rag(case, "troubleshooting", case_data, request, db)
     provider = get_ai_provider()
     content, latency_ms = await _run_generation("troubleshooting", provider.generate_troubleshooting(case.symptoms, case_data))
-    _augment_with_rag(case, "troubleshooting", content, request, db)
+    _attach_retrieval(content, retrieval)
     return _save_generated_content(case_id, "troubleshooting", content, db, latency_ms=latency_ms)
 
 
@@ -175,8 +194,10 @@ async def generate_report(
     case = _get_case_or_404(case_id, db)
     assert_case_edit(db, case, principal)
     provider = get_ai_provider()
-    content, latency_ms = await _run_generation("report", provider.generate_report(_full_case_data(case)))
-    _augment_with_rag(case, "report", content, request, db)
+    case_data = _full_case_data(case)
+    retrieval = _prepare_rag(case, "report", case_data, request, db)
+    content, latency_ms = await _run_generation("report", provider.generate_report(case_data))
+    _attach_retrieval(content, retrieval)
     return _save_generated_content(case_id, "report", content, db, latency_ms=latency_ms)
 
 

@@ -9,8 +9,8 @@ class ExperimentCaseBase(BaseModel):
     project_id: Optional[int] = None
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
-    cavity_type: str = Field(..., pattern="^(linear|ring|bow-tie|custom)$")
-    goal: str = Field(..., min_length=1)
+    cavity_type: str = Field(default="custom", pattern="^(linear|ring|bow-tie|custom)$")
+    goal: str = Field(default="待通过设计对话明确", min_length=1)
     status: str = Field(default="draft", pattern="^(draft|active|paused|completed|archived)$")
     visibility: str = Field(default="project", pattern="^(private|project|organization)$")
     schema_version: str = "case_v2"

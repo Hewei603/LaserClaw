@@ -18,6 +18,12 @@ def get_ai_provider() -> AIProvider:
     settings = get_settings()
     provider_name = settings.ai_provider.lower()
 
+    if provider_name == "codex_exec":
+        from .codex_exec import CodexExecProvider
+
+        # An unavailable CLI must stay an explicit error, never demo output.
+        return CodexExecProvider()
+
     if provider_name == "openai":
         if not settings.openai_api_key:
             message = "AI_PROVIDER=openai but OPENAI_API_KEY is missing"
@@ -108,6 +114,17 @@ def provider_status() -> dict:
             "error": str(exc),
         }
     is_mock = isinstance(provider, MockProvider)
+    if settings.ai_provider.lower() == "codex_exec":
+        from .codex_exec import codex_status
+
+        runtime = codex_status()
+        return {
+            "configured_provider": "codex_exec",
+            "effective_provider": "codex_exec" if runtime["ready"] else None,
+            "is_mock": False,
+            "billing_mode": "chatgpt_subscription",
+            **({"error": runtime["message"]} if not runtime["ready"] else {}),
+        }
     return {
         "configured_provider": settings.ai_provider,
         "effective_provider": "mock" if is_mock else settings.ai_provider.lower(),

@@ -46,6 +46,31 @@ SUPPORTED_IMAGE_MEDIA_TYPES = {"image/jpeg", "image/png", "image/gif", "image/we
 class AnthropicProvider(AIProvider):
     """AI provider backed by Anthropic's native Messages API."""
 
+    async def agent_turn(self, instructions, messages, tools):
+        from .tool_calling import anthropic_turn
+        return await anthropic_turn(self, instructions, messages, tools)
+
+    async def extract_design_facts(self, context: dict, images: list[dict]) -> dict:
+        from ..design.brief import extraction_prompt
+
+        content = [{"type": "text", "text": json.dumps(context, ensure_ascii=False)}]
+        for item in images:
+            content.extend([
+                {"type": "text", "text": f"Evidence source: image:{item['id']}"},
+                {"type": "image", "source": {"type": "base64", "media_type": item["mime"],
+                                             "data": base64.b64encode(item["data"]).decode("ascii")}},
+            ])
+        response = await asyncio.to_thread(
+            self.client.messages.create, model=self.model, max_tokens=6000,
+            system=extraction_prompt(), messages=[{"role": "user", "content": content}],
+        )
+        if getattr(response, "stop_reason", None) == "max_tokens":
+            raise RuntimeError("模型需求提取被截断，请拆分说明或减少图片后重试。")
+        result = self._extract_json(self._message_text(response))
+        result["model"] = self.model
+        usage = response.usage.model_dump() if response.usage else {}
+        return attach_usage_payload(result, provider="anthropic", model=self.model, usage=usage)
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -271,7 +296,7 @@ Return JSON with this shape:
                 # behind a generic "service unavailable" after two attempts.
                 logger.error("Anthropic auth/permission failure: %s", exc)
                 raise RuntimeError(
-                    f"API key 无效或无权限:请检查 .env 中的 ANTHROPIC_API_KEY 是否正确、账户是否有额度。"
+                    f"API key 无效或无权限:请检查首页 Agent 配置（或 .env）中的 Anthropic API key、账户额度。"
                     f"(原始错误:{type(exc).__name__})"
                 ) from exc
 
@@ -294,7 +319,7 @@ Return JSON with this shape:
 
         raise RuntimeError(
             f"模型服务暂时不可用(已重试):{type(last_error).__name__}。请稍后重试;"
-            f"若持续失败,请检查网络与 .env 配置。"
+            f"若持续失败,请检查网络与首页 Agent 配置（或 .env）。"
         )
 
     @staticmethod

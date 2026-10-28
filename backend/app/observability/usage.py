@@ -37,7 +37,8 @@ def attach_usage_payload(content: dict[str, Any], *, provider: str, model: str, 
     usage = usage or {}
     input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens")
     output_tokens = usage.get("output_tokens") or usage.get("completion_tokens")
-    cost = estimate_cost_usd(model, input_tokens, output_tokens)
+    # Subscription tokens are observable, but API price tables do not apply.
+    cost = None if provider == "codex_exec" else estimate_cost_usd(model, input_tokens, output_tokens)
     content["_usage"] = {
         "provider": provider,
         "model": model,
@@ -46,6 +47,8 @@ def attach_usage_payload(content: dict[str, Any], *, provider: str, model: str, 
         "total_tokens": usage.get("total_tokens") or ((input_tokens or 0) + (output_tokens or 0)),
         "cost_estimate_usd": cost,
     }
+    if provider == "codex_exec":
+        content["_usage"]["billing_mode"] = "chatgpt_subscription"
     return content
 
 

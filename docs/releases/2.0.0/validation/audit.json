@@ -1,0 +1,98 @@
+{
+  "case_id": 5,
+  "task_id": 14,
+  "project_revision_id": 36,
+  "database": "isolated backup of the real case",
+  "provider": "codex_exec",
+  "model": "gpt-6.1-sol",
+  "outcome": "partial — geometry verified, power optimum not established",
+  "successful_tools_excluding_finish": 10,
+  "failed_tools": 0,
+  "geometry_mm": {
+    "front_gap": 3,
+    "crystal_total": 11,
+    "active": 8,
+    "undoped_total": 3,
+    "rear_gap": 12,
+    "mirror_spacing": 26
+  },
+  "analytic_cold_cavity": {
+    "n": 2.1648721403743165,
+    "reduced_one_way_length_mm": 20.081131488023146,
+    "m": 0.7991886851197685,
+    "waist_z_mm": 26,
+    "waist_radius_um": 142.6796713788896,
+    "active_center_z_mm": 10,
+    "active_center_radius_um": 146.41707843140804
+  },
+  "independent_check": {
+    "method": "separate normal-incidence 2x2 ABCD multiplication and complex fixed-point solution; no LaserClaw imports",
+    "maximum_matrix_or_m_error": 0.0,
+    "maximum_node_radius_error_mm": 2.7755575615628914e-17,
+    "maps": [
+      {
+        "tool_id": 72,
+        "grid_points": 1769,
+        "stable_points": 1679,
+        "maximum_m_error": 0.0,
+        "classification_mismatches": 0
+      },
+      {
+        "tool_id": 73,
+        "grid_points": 1769,
+        "stable_points": 1667,
+        "maximum_m_error": 0.0,
+        "classification_mismatches": 0
+      }
+    ],
+    "scans": [
+      {
+        "tool_id": 74,
+        "points": 7,
+        "maximum_m_error": 0.0
+      },
+      {
+        "tool_id": 77,
+        "points": 10,
+        "maximum_m_error": 0.0
+      },
+      {
+        "tool_id": 78,
+        "points": 10,
+        "maximum_m_error": 0.0
+      }
+    ]
+  },
+  "workflow_verdict": {
+    "valid": [
+      "Reads current project and inventory before computing",
+      "Honors 11/8 mm user correction and owned mirror roles",
+      "Two crystal orientations and uncertain thermal lens are explicit scenarios",
+      "Preserves raw tool traces and editable revision",
+      "Distinguishes computed cavity mode from unmeasured pump beam",
+      "Does not invent watts, efficiency or global optimum"
+    ],
+    "limitations": [
+      "No gain saturation, output-power, spatial heat-field or compound-cavity solver in current ABCD tool",
+      "Nominal 6 W is not measured incident or absorbed power",
+      "Actual pump caustic, mirror R/T, crystal coating and thermal conditions missing",
+      "Three millimetres of undoped material at one end is an orientation assumption",
+      "26 mm is a conditional adjustable reference, not an independently optimized maximum-power design"
+    ],
+    "fixed_during_review": [
+      "Report/plan context previously preferred an obsolete 17 mm specialized design; now uses the latest optical project",
+      "Parent case artifacts refresh on completed Agent runs",
+      "Readable field radius/spot/position views and scenario selection added"
+    ]
+  },
+  "verification": {
+    "pytest_passed": 540,
+    "pytest_skipped": 3,
+    "ruff": "passed",
+    "frontend_lint": "passed",
+    "frontend_build": "passed",
+    "png_svg_csv_exports": "verified in UI"
+  },
+  "release": "2.0.0",
+  "original_development_build": "3.5.0"
+}

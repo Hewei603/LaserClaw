@@ -1,4 +1,22 @@
-# LaserClaw
+# LaserClaw 2.0
+
+**A task-led AI Agent for laser experiment design, simulation and measurement analysis.** Start a case with a title and description, then provide available components, constraints, images or measured data. The Agent chooses tools, checks real numerical results, saves editable optical projects and asks actionable measurement questions when information is missing.
+
+[User guide](docs/GUIDE_V2.md) · [Codex exec setup](docs/CODEX_EXEC.md) · [Agent tools and model scope](docs/WORKBENCH.md) · [2.0 release and real-case acceptance](docs/releases/2.0.0/README.md) · [中文](READMEcn.md)
+
+## New in 2.0
+
+- **API Key or Codex exec** on the homepage. Codex exec uses the backend host's official CLI and ChatGPT subscription sign-in, defaults to `gpt-6.1-sol`, and includes status and a real connection test. API credentials retain show/hide controls and survive mode changes.
+- **An iterative, tool-using Agent** that reads inventory, attachments and previous results, constructs models, scans parameters, compares scenarios and saves editable projects. Missing inputs become questions with acquisition methods and units.
+- **General paraxial optical projects** for single-pass propagation, standing-wave cavities and coplanar rings, with T/S planes, thin/thick lenses, GRIN, real ABCD elements, measured-caustic fitting and two-parameter stability maps. Owned hardware constraints and revision history are retained.
+- **Readable optical visualization** with physical coordinates, active/crystal boundaries, radius/diameter and unit controls, field profiles, Gaussian cross sections and CSV/SVG/PNG exports. Engineering results can use the full page width.
+- **Consistent current results**: plans and reports use the latest project while preserving historical designs, raw tool traces, partial results and failures. Inventory refresh preserves identities, loans and manual condition records.
+
+**Model scope:** numerical optics currently runs LaserClaw's Python/NumPy ABCD implementation, not an integrated Rezonator C++ runtime. Geometric stability, ideal Gaussian modes and assumed thermal-lens scans do not establish actual lasing, output power or maximum efficiency. Gain saturation, spatial heat fields and uncoated-face compound cavities require additional models and measurements. The acceptance case deliberately reports a conditional layout rather than an unsupported power optimum.
+
+![1064 nm cold-cavity mode](docs/releases/2.0.0/validation/field-radius.png)
+
+Local validation: 540 backend tests passed, three skipped; frontend lint and production build passed. A real Codex subscription run performed ten successful read/calculation calls, and an independent matrix implementation checked all 3,538 points across two crystal-orientation stability maps. See the [acceptance report](docs/releases/2.0.0/validation/review.html).
 
 LaserClaw is a local-first **RAG Agent workspace for laser experiment workflows**. It combines experiment case management, lab knowledge indexing, case-specific evidence retrieval, structured AI artifact generation, persistent Agent traces, and collaboration-oriented governance.
 

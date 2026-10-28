@@ -15,7 +15,7 @@ from ..auth.security import Principal, get_current_principal
 from ..config import get_settings
 from ..database import get_db
 from ..inventory.evaluator import evaluate_candidates
-from ..inventory.importer import import_workbook
+from ..inventory.importer import InventoryRefreshConflict, refresh_workbook
 from ..models import CoatingSpec, InventoryItem, InventoryLoan
 from ..observability.audit import record_audit
 from ..schemas import (
@@ -39,8 +39,8 @@ async def import_inventory(
 ):
     """Import a lab inventory workbook (xlsx).  Reviewer/admin only.
 
-    Re-importing the same source file replaces its previous rows (idempotent
-    refresh), keeping other sources untouched.
+    Re-importing the same source updates parsed fields while preserving item
+    IDs, manual condition and loan history. Other sources stay untouched.
     """
     if not can_manage_knowledge(principal):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要 reviewer 或 admin 权限")
@@ -61,9 +61,8 @@ async def import_inventory(
 
     source_name = os.path.basename(file.filename or "inventory.xlsx")
 
-    # Re-importing replaces this batch's rows, which retires their ids — and
-    # SQLite reuses rowids, so an open loan would silently re-point at whatever
-    # component happens to take the freed id. Refuse instead of corrupting.
+    # Require returns before reconciling a batch: its revised quantity/specs
+    # must not invalidate items currently signed out.
     outstanding = (
         db.query(InventoryLoan)
         .join(InventoryItem, InventoryLoan.item_id == InventoryItem.id)
@@ -82,12 +81,13 @@ async def import_inventory(
         )
 
     try:
-        # Row-by-row so the CoatingSpec/InventoryLoan cascades actually run; a
-        # bulk delete bypasses the ORM and orphans the child rows.
-        for stale in db.query(InventoryItem).filter(InventoryItem.source_file == source_name).all():
-            db.delete(stale)
-        report = import_workbook(db, stored, source_file=source_name)
+        report = refresh_workbook(db, stored, source_file=source_name)
+    except InventoryRefreshConflict as exc:
+        db.rollback()
+        stored.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RuntimeError as exc:
+        db.rollback()
         stored.unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED,
                             detail=f"服务端缺少解析依赖:{exc}")

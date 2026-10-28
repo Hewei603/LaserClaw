@@ -18,7 +18,10 @@ fooled by a half-written file.
 from __future__ import annotations
 
 import os
+import json
 import shutil
+import sqlite3
+import filecmp
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -73,6 +76,96 @@ def _atomic_dir_migrate(sources: list[Path], target: Path) -> None:
     os.replace(staging, target)
 
 
+def _repair_upload_paths(database: Path, uploads: Path) -> int:
+    """Rebase persisted paths, including databases copied by earlier releases.
+
+    Only point to files that actually exist in the external directory. A fresh
+    checkout may have a different root from the old one, so use the uploads
+    suffix stored in the database instead of assuming the current repo path.
+    """
+    if not database.is_file():
+        return 0
+    with database.open("rb") as handle:
+        if handle.read(16) != b"SQLite format 3\x00":
+            return 0
+    upload_root = uploads.resolve()
+
+    def rebase(value):
+        if not isinstance(value, str):
+            return value
+        normalized = value.replace("\\", "/")
+        _, separator, suffix = normalized.rpartition("/uploads/")
+        if not separator:
+            if normalized.startswith("uploads/"):
+                suffix = normalized[len("uploads/"):]
+            else:
+                return value
+        candidate = (upload_root / suffix).resolve()
+        if not candidate.is_relative_to(upload_root) or not candidate.is_file():
+            return value
+        original = Path(value)
+        if original.is_absolute() and original.resolve() == candidate:
+            return value
+        # Never redirect an existing file to different bytes on a filename
+        # collision. UUID-based uploads normally make this impossible.
+        if original.is_file() and not filecmp.cmp(original, candidate, shallow=False):
+            return value
+        return str(candidate)
+
+    def rebase_metadata(value):
+        if isinstance(value, dict):
+            return {key: rebase(item) if key == "filepath" else rebase_metadata(item)
+                    for key, item in value.items()}
+        if isinstance(value, list):
+            return [rebase_metadata(item) for item in value]
+        return value
+
+    connection = sqlite3.connect(database)
+    try:
+        changes = []
+        for table, column, is_json in (
+            ("attachments", "filepath", False),
+            ("case_module_files", "filepath", False),
+            ("case_module_files", "metadata_json", True),
+            ("knowledge_sources", "metadata_json", True),
+        ):
+            columns = {row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')}
+            if "id" not in columns or column not in columns:
+                continue
+            for row_id, raw in connection.execute(f'SELECT id, "{column}" FROM "{table}"'):
+                if is_json:
+                    try:
+                        parsed = json.loads(raw) if raw else None
+                    except (TypeError, ValueError):
+                        continue
+                    updated = rebase_metadata(parsed)
+                    if updated == parsed:
+                        continue
+                    updated = json.dumps(updated, ensure_ascii=False)
+                else:
+                    updated = rebase(raw)
+                    if updated == raw:
+                        continue
+                changes.append((table, column, updated, row_id))
+        if changes:
+            backup = database.with_name(database.name + ".before-upload-paths.bak")
+            if not backup.exists():
+                staging = backup.with_name(backup.name + _STAGING_SUFFIX)
+                staging.unlink(missing_ok=True)
+                destination = sqlite3.connect(staging)
+                try:
+                    connection.backup(destination)
+                finally:
+                    destination.close()
+                os.replace(staging, backup)
+            with connection:
+                for table, column, value, row_id in changes:
+                    connection.execute(f'UPDATE "{table}" SET "{column}" = ? WHERE id = ?', (value, row_id))
+        return len(changes)
+    finally:
+        connection.close()
+
+
 def migrate_legacy_data(settings, repo_root: Path | None = None) -> list[str]:
     """Copy pre-2.1 in-tree data to the configured locations. Returns log notes.
 
@@ -110,6 +203,13 @@ def migrate_legacy_data(settings, repo_root: Path | None = None) -> list[str]:
         _atomic_dir_migrate(upload_sources, target_uploads)
         for legacy in upload_sources:
             notes.append(f"已把旧附件目录 {legacy} 复制到 {target_uploads}")
+
+    # Run on every startup, even when the target was copied by an older
+    # release. Successful repairs are idempotent; missing files are untouched.
+    if target_db is not None:
+        repaired = _repair_upload_paths(target_db, target_uploads)
+        if repaired:
+            notes.append(f"已更新 {repaired} 处附件路径到数据目录；修改前数据库保存在 .before-upload-paths.bak")
 
     # RAG vector store — first existing candidate only: the two locations are
     # alternative homes of the SAME index, and merging two indexes would

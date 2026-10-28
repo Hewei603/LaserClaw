@@ -322,6 +322,18 @@ def search_case_and_global_knowledge(
     if case_id is not None:
         filters["case_id"] = case_id
 
+    # Bound both the saved results and model context by the requested top_k.
+    # Reserve a share for each tier; let the other tier fill unused slots.
+    if len(global_scored) + len(case_scored) > top_k:
+        total_slots = max(global_slots + case_slots, 1)
+        global_budget = (top_k * global_slots + total_slots - 1) // total_slots
+        if case_scored and top_k > 1:
+            global_budget = min(global_budget, top_k - 1)
+        global_count = min(len(global_scored), global_budget)
+        case_count = min(len(case_scored), max(0, top_k - global_count))
+        global_count = min(len(global_scored), max(0, top_k - case_count))
+        global_scored = global_scored[:global_count]
+        case_scored = case_scored[:case_count]
     selected = global_scored + case_scored
     selected.sort(key=lambda item: item[0], reverse=True)
     run = _new_retrieval_run(db, task_id=task_id, query=query, filters=filters, top_k=top_k, selected=selected[:top_k])

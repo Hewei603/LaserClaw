@@ -1,9 +1,12 @@
 """Test configuration."""
 import os
+import tempfile
 
 # Ignore any developer .env so the suite never picks up real API keys
 # or a different provider. Must be set before app.config is imported.
 os.environ["LASERCLAW_NO_DOTENV"] = "1"
+_settings_directory = tempfile.TemporaryDirectory(prefix="laserclaw-test-settings-")
+os.environ["AGENT_SETTINGS_FILE"] = os.path.join(_settings_directory.name, "initial.json")
 
 import pytest
 from sqlalchemy import create_engine
@@ -28,9 +31,10 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 
 @pytest.fixture(autouse=True)
-def use_mock_ai_provider(monkeypatch):
+def use_mock_ai_provider(monkeypatch, tmp_path):
     """Keep API tests deterministic even when the app container uses OpenAI."""
     monkeypatch.setenv("AI_PROVIDER", "mock")
+    monkeypatch.setenv("AGENT_SETTINGS_FILE", str(tmp_path / "agent-settings.json"))
     # Literature search must never hit the network in tests: the mock source
     # returns canned records through the same service path.
     monkeypatch.setenv("LITERATURE_PROVIDERS", "mock")

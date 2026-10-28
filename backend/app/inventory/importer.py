@@ -14,10 +14,11 @@ Every row keeps its raw text; ambiguous rows land in the review queue
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..models import CoatingSpec, InventoryItem
 from .parser import (
@@ -188,6 +189,9 @@ def import_workbook(db: Session, path: str | Path, *, source_file: str | None = 
     path = Path(path)
     src = source_file or path.name
     wb = openpyxl.load_workbook(path, data_only=True)
+    # Normal-mode worksheets are materialized; close the underlying archive
+    # now so a failed refresh can remove its staged workbook on Windows too.
+    wb.close()
     report = ImportReport()
 
     # Sheet 1: mirrors (header row 0; forward-filled name/size groups)
@@ -238,4 +242,95 @@ def import_workbook(db: Session, path: str | Path, *, source_file: str | None = 
                 source_file=src,
             )
 
+    return report
+
+
+class InventoryRefreshConflict(ValueError):
+    """A workbook edit cannot be matched to recorded physical items safely."""
+
+
+def refresh_workbook(db: Session, path: str | Path, *, source_file: str) -> ImportReport:
+    """Refresh parsed fields without replacing item IDs or human history.
+
+    A spec variant is identified by its name and original optical spec, never
+    by its row position (sorting Excel must not transfer a damage verdict).
+    Logistics disambiguate duplicate variants. If a protected row's identity
+    becomes ambiguous, the API rolls back the entire refresh.
+    """
+    previous = (
+        db.query(InventoryItem)
+        .options(selectinload(InventoryItem.loans), selectinload(InventoryItem.coatings))
+        .filter(InventoryItem.source_file == source_file)
+        .order_by(InventoryItem.id).all()
+    )
+    previous_ids = {item.id for item in previous}
+    report = import_workbook(db, path, source_file=source_file)
+    db.flush()
+    incoming = (
+        db.query(InventoryItem).options(selectinload(InventoryItem.coatings))
+        .filter(InventoryItem.source_file == source_file, InventoryItem.id.not_in(previous_ids))
+        .order_by(InventoryItem.id).all()
+    )
+
+    def identity(item):
+        return (item.category, item.name.strip(), (item.raw_spec or "").strip())
+
+    def logistics(item):
+        return (item.location, item.keeper, item.vendor)
+
+    def protected(item):
+        return item.condition_manual is not None or bool(item.loans)
+
+    old_groups, new_groups = defaultdict(list), defaultdict(list)
+    for item in previous:
+        old_groups[identity(item)].append(item)
+    for item in incoming:
+        new_groups[identity(item)].append(item)
+
+    matched_ids, remapped_ids = set(), {}
+    excluded = {"id", "created_at", "updated_at", "condition_manual", "condition_note",
+                "condition_marked_by", "condition_marked_at"}
+    for key, new_items in new_groups.items():
+        remaining = list(old_groups[key])
+        ambiguous = len(remaining) > 1 or len(new_items) > 1
+        if ambiguous and any(protected(item) for item in remaining):
+            old_logistics = [logistics(item) for item in remaining]
+            new_logistics = [logistics(item) for item in new_items]
+            if (len(set(old_logistics)) != len(old_logistics)
+                    or len(set(new_logistics)) != len(new_logistics)
+                    or any(logistics(item) not in new_logistics for item in remaining if protected(item))):
+                raise InventoryRefreshConflict(f"元件「{key[1]}」有重复规格且无法对应人工标记或借用历史，请保留可区分的存放地/保管人后重试。")
+        for fresh in new_items:
+            candidates = [item for item in remaining if logistics(item) == logistics(fresh)]
+            old = candidates[0] if candidates else (remaining[0] if remaining and not ambiguous else None)
+            if old is None and remaining and not any(protected(item) for item in remaining):
+                old = remaining[0]
+            if old is None:
+                continue
+            remaining.remove(old)
+            for column in InventoryItem.__table__.columns:
+                if column.name not in excluded:
+                    setattr(old, column.name, getattr(fresh, column.name))
+            old.coatings = list(fresh.coatings)
+            matched_ids.add(old.id)
+            remapped_ids[fresh.id] = old.id
+            db.delete(fresh)
+
+    unmatched_new = [item for item in incoming if item.id not in remapped_ids]
+    for old in previous:
+        if old.id in matched_ids:
+            continue
+        if protected(old):
+            if any(item.name == old.name for item in unmatched_new):
+                raise InventoryRefreshConflict(f"元件「{old.name}」的规格已改变，无法自动对应已有人工标记或借用历史；请核对清单中的名称和规格后重试。")
+            # Removed rows with history remain inspectable, but cannot be
+            # borrowed or recommended as stock that the new workbook omits.
+            old.quantity = 0
+            note = "未出现在最新导入清单中，库存置零并保留人工状态和借用历史。"
+            old.parse_notes = list(dict.fromkeys([*(old.parse_notes or []), note]))
+        else:
+            db.delete(old)
+    for row in report.review_queue:
+        row["item_id"] = remapped_ids.get(row["item_id"], row["item_id"])
+    db.flush()
     return report

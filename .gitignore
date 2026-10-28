@@ -69,3 +69,14 @@ rezonator2/
 
 # Claude Code local tooling (dev-server config, not project source)
 .claude/
+
+# Local acceptance runs, credentials and temporary artifacts
+/tmp/
+/output/
+.agent-settings.json
+*.db-wal
+*.db-shm
+
+# Personal career documents are not product source
+/简历对照备考.md
+/面试手册-LaserClaw.md

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { inventoryApi } from '../api/inventory';
 import { useLanguage } from '../LanguageContext';
 
@@ -14,13 +15,14 @@ function coatingChip(coating) {
 
 function InventoryPage() {
   const { t, te } = useLanguage();
+  const [searchParams] = useSearchParams();
   const [items, setItems] = useState([]);
   const [loadingItems, setLoadingItems] = useState(true);
   const [error, setError] = useState(null);
   const [importReport, setImportReport] = useState(null);
   const [importing, setImporting] = useState(false);
   const [filters, setFilters] = useState({ category: '', wavelengthNm: '', functionName: '' });
-  const [nameQuery, setNameQuery] = useState('');
+  const [nameQuery, setNameQuery] = useState(searchParams.get('search') || '');
   const [showReview, setShowReview] = useState(false);
   const [matchForm, setMatchForm] = useState({
     mode: 'coating',                     // coating = 镜片镀膜需求, crystal = 非线性晶体切角需求

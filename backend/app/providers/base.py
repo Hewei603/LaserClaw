@@ -6,6 +6,14 @@ from typing import Any, Dict, List
 class AIProvider(ABC):
     """Abstract AI provider."""
 
+    async def agent_turn(self, instructions: str, messages: list[dict], tools: list[dict]) -> dict:
+        """One native tool-calling turn; orchestration belongs to the workbench."""
+        raise NotImplementedError("当前模型适配器尚未提供 Agent 工具调用接口")
+
+    async def extract_design_facts(self, context: dict, images: list[dict]) -> dict:
+        """Extract quoted requirements; the deterministic solver owns the design."""
+        raise NotImplementedError("当前模型适配器不支持设计需求提取")
+
     @abstractmethod
     async def generate_plan(self, case_data: Dict[str, Any]) -> Dict[str, Any]:
         pass

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useLanguage } from '../LanguageContext';
+import AgentSettings from '../components/AgentSettings';
 
 function Home() {
   const { t } = useLanguage();
@@ -50,6 +51,8 @@ function Home() {
           </Link>
         </div>
       </div>
+
+      <AgentSettings />
 
       <p className="home-disclaimer">{t('home.disclaimer')}</p>
     </div>

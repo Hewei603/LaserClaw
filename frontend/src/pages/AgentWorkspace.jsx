@@ -1,205 +1,24 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { agentApi } from '../api/agent';
 import { casesApi } from '../api/cases';
-import { knowledgeApi } from '../api/knowledge';
-import { useLanguage } from '../LanguageContext';
+import ExperimentWorkbench from '../components/ExperimentWorkbench';
+import LegacyAgentWorkspace from './LegacyAgentWorkspace';
 
-function AgentWorkspace() {
-  const { t } = useLanguage();
+export default function AgentWorkspace() {
   const [cases, setCases] = useState([]);
   const [caseId, setCaseId] = useState('');
-  const [sessionId, setSessionId] = useState(null);
-  const [sessions, setSessions] = useState([]);
-  const [globalSources, setGlobalSources] = useState([]);
-  const [message, setMessage] = useState('');
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState(null);
-  const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      text: null,
-    },
-  ]);
-
+  const [caseData, setCaseData] = useState(null);
+  const [legacy, setLegacy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { casesApi.list().then(setCases).catch(e => setError(e.message)); }, []);
   useEffect(() => {
-    setMessages([{ role: 'assistant', text: t('agentPage.welcomeNoCase') }]);
-  }, []);
-
-  useEffect(() => {
-    casesApi.list().then(setCases).catch((err) => setError(err.message));
-    loadSessions(null);
-    loadGlobalSources();
-  }, []);
-
-  useEffect(() => {
-    const linkedCaseId = caseId ? Number(caseId) : null;
-    setSessionId(null);
-    setMessages([
-      {
-        role: 'assistant',
-        text: linkedCaseId ? t('agentPage.welcomeCase') : t('agentPage.welcomeNoCase'),
-      },
-    ]);
-    loadSessions(linkedCaseId);
+    let alive = true;
+    if (caseId) casesApi.get(caseId).then(data => { if (alive) setCaseData(data); }).catch(e => { if (alive) setError(e.message); });
+    return () => { alive = false; };
   }, [caseId]);
-
-  const loadSessions = async (linkedCaseId) => {
-    try {
-      const data = await agentApi.listSessions(linkedCaseId);
-      setSessions(data);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const loadGlobalSources = async () => {
-    try {
-      const data = await knowledgeApi.listSources();
-      setGlobalSources(data.filter((item) => !item.case_id));
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const loadSession = async (id) => {
-    if (!id) {
-      setSessionId(null);
-      setMessages([
-        {
-          role: 'assistant',
-          text: caseId ? t('agentPage.welcomeCase') : t('agentPage.welcomeNoCase'),
-        },
-      ]);
-      return;
-    }
-    try {
-      const data = await agentApi.getSession(id);
-      setSessionId(data.id);
-      if (data.case_id) setCaseId(String(data.case_id));
-      setMessages(data.messages.map((item) => ({
-        role: item.role,
-        text: item.content,
-        routedMode: item.metadata_json?.routed_mode && item.metadata_json.routed_mode !== 'chat' ? item.metadata_json.routed_mode : null,
-        task: item.metadata_json?.task_id ? { id: item.metadata_json.task_id, status: 'completed' } : null,
-        citations: item.metadata_json?.citations || [],
-      })));
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const selectedCase = useMemo(
-    () => cases.find((item) => String(item.id) === String(caseId)),
-    [cases, caseId],
-  );
-
-  const submit = async (event) => {
-    event.preventDefault();
-    if (!message.trim()) return;
-    const userText = message.trim();
-    setMessages((prev) => [...prev, { role: 'user', text: userText }]);
-    setMessage('');
-    setRunning(true);
-    setError(null);
-    try {
-      const response = await agentApi.chat({
-        message: userText,
-        caseId: caseId ? Number(caseId) : null,
-        sessionId,
-      });
-      setSessionId(response.session_id);
-      setMessages((prev) => [...prev, {
-        role: 'assistant',
-        text: response.message,
-        routedMode: response.routed_mode !== 'chat' ? response.routed_mode : null,
-        task: response.task ? { id: response.task.id, status: response.task.status } : null,
-        citations: response.citations || [],
-      }]);
-      loadSessions(caseId ? Number(caseId) : null);
-    } catch (err) {
-      setError(err.message);
-      setMessages((prev) => [...prev, { role: 'assistant', text: t('agentPage.failed') + err.message }]);
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  return (
-    <div className="agent-shell">
-      <aside className="agent-sidebar">
-        <div>
-          <h1>{t('agentPage.title')}</h1>
-          <p className="muted">{t('agentPage.desc')}</p>
-        </div>
-        <label className="form-label" htmlFor="agent-case">{t('agentPage.caseContext')}</label>
-        <select id="agent-case" value={caseId} onChange={(event) => setCaseId(event.target.value)}>
-          <option value="">{t('agentPage.noCase')}</option>
-          {cases.map((item) => (
-            <option key={item.id} value={item.id}>{item.title}</option>
-          ))}
-        </select>
-        {selectedCase && (
-          <div className="agent-context">
-            <strong>{selectedCase.title}</strong>
-            <span className="meta-pill">{selectedCase.cavity_type}</span>
-            <p>{selectedCase.goal}</p>
-            <Link to={`/cases/${selectedCase.id}`} className="btn btn-secondary">{t('agentPage.openCase')}</Link>
-          </div>
-        )}
-        <label className="form-label" htmlFor="agent-session">{t('agentPage.session')}</label>
-        <select id="agent-session" value={sessionId || ''} onChange={(event) => loadSession(event.target.value)}>
-          <option value="">{t('agentPage.newSession')}</option>
-          {sessions.map((item) => (
-            <option key={item.id} value={item.id}>{item.title || `${t('agentPage.sessionFallback')}${item.id}`}</option>
-          ))}
-        </select>
-        <div className="agent-context">
-          <strong>{t('agentPage.globalKnowledge')}</strong>
-          <p className="muted">{t('agentPage.globalDesc')}</p>
-          {globalSources.slice(0, 5).map((source) => (
-            <span key={source.id} className="meta-pill">{source.title}</span>
-          ))}
-          {globalSources.length === 0 && (
-            <span className="muted" style={{ fontSize: '0.82rem' }}>{t('agentPage.noLabDocs')}</span>
-          )}
-        </div>
-      </aside>
-
-      <section className="chat-panel">
-        {error && <div className="error">{error}</div>}
-        <div className="chat-stream">
-          {messages.map((item, index) => (
-            <article key={`${item.role}-${index}`} className={`chat-message ${item.role}`}>
-              <span>{item.role === 'user' ? t('agentPage.you') : 'LaserClaw'}</span>
-              <p>{item.text}</p>
-              {(item.routedMode || item.task) && (
-                <div className="chat-meta">
-                  {item.routedMode && <span className="meta-pill">{item.routedMode}</span>}
-                  {item.task && <span className="meta-pill">Task #{item.task.id} · {item.task.status}</span>}
-                </div>
-              )}
-              {(item.citations || []).length > 0 && (
-                <div className="chat-citations">
-                  {item.citations.slice(0, 3).map((c) => (
-                    <span key={`${c.source_id}-${c.chunk_id}`} className="meta-pill" title={c.snippet}>
-                      📎 {c.title} · {c.score}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
-        <form className="chat-composer" onSubmit={submit}>
-          <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder={t('agentPage.placeholder')} rows={3} />
-          <button className="btn btn-primary" disabled={running} type="submit">
-            {running ? t('agentPage.running') : t('agentPage.send')}
-          </button>
-        </form>
-      </section>
-    </div>
-  );
+  return <div><div className="detail-header"><div><h1>实验 Agent</h1><p className="muted">围绕任务理解、计算、查证与追问；工具由 Agent 按需选择。</p></div><div className="action-row"><Link className="btn btn-primary" to="/cases/new">＋ 新建任务</Link><button className="btn btn-secondary" onClick={() => setLegacy(v => !v)}>{legacy ? '返回任务工作区' : '旧版对话记录'}</button></div></div>
+    {error && <p role="alert" className="error">{error}</p>}
+    {legacy ? <LegacyAgentWorkspace /> : <><div className="card" style={{ marginBottom: 24 }}><label htmlFor="agent-case">选择一个案例继续工作</label><select id="agent-case" value={caseId} onChange={e => setCaseId(e.target.value)} style={{ marginLeft: 14, maxWidth: '100%' }}><option value="">选择案例…</option>{cases.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}</select>{caseId && <Link to={`/cases/${caseId}`} style={{ marginLeft: 16 }}>打开案例 →</Link>}</div>
+      {caseData?.id === Number(caseId) ? <ExperimentWorkbench key={caseData.id} caseData={caseData} /> : <div className="wb-empty"><div className="wb-orbit">λ</div><h3>把你要解决的问题带进来。</h3><p>可以是一个设计目标、一段测量数据、一组已有元件，或一个尚未解释的实验现象。新建任务只需要标题和描述。</p><Link to="/cases/new">开始一个新任务 →</Link></div>}</>}
+  </div>;
 }
-
-export default AgentWorkspace;

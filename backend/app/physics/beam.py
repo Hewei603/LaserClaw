@@ -136,7 +136,7 @@ def q_from_beam(w_mm: float, radius_mm: float | None, wavelength_nm: float, n: f
 
 
 def w_from_q(q: complex, wavelength_nm: float, n: float = 1.0) -> float:
-    """Beam radius ``w`` (1/e^2 amplitude) from the complex beam parameter."""
+    """Beam radius ``w`` (1/e^2 intensity) from the complex beam parameter."""
     lam0_mm = wavelength_nm * 1e-6
     imq = q.imag
     if imq <= 0:

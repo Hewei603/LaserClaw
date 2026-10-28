@@ -53,16 +53,25 @@ function ProviderBanner() {
 
   useEffect(() => {
     let cancelled = false;
+    let settingsChanged = false;
+    const onSettingsUpdated = (event) => {
+      settingsChanged = true;
+      setProvider(event.detail);
+    };
+    window.addEventListener('agent-settings-updated', onSettingsUpdated);
     apiClient.get('/health')
       .then((res) => {
         if (cancelled) return;
-        setProvider(res.data?.provider || null);
+        if (!settingsChanged) setProvider(res.data?.provider || null);
         // Pre-2.1 backends report no version at all — that is exactly the
         // stale-process case this banner exists for, so map it to null.
         setBackendVersion(res.data?.version || null);
       })
       .catch(() => {});      // unreachable backend already yields page-level errors
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      window.removeEventListener('agent-settings-updated', onSettingsUpdated);
+    };
   }, []);
 
   // The launcher-started backend keeps serving old code until its window is

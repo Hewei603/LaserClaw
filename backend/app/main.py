@@ -9,10 +9,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import admin, agent, attachments, case_modules, cases, collaboration, evals, generation, inventory, knowledge, literature, versioning
+from .api import admin, agent, attachments, case_modules, cases, collaboration, design, evals, generation, inventory, knowledge, literature, settings as settings_api, versioning
 from .config import get_settings
 from .database import Base, engine, sync_additive_schema
 from .version import APP_VERSION
+from .api import workbench
 from . import models  # noqa: F401 - register SQLAlchemy models
 
 settings = get_settings()
@@ -40,15 +41,6 @@ app = FastAPI(
     version=APP_VERSION,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
@@ -59,6 +51,17 @@ async def request_id_middleware(request: Request, call_next):
         return JSONResponse(status_code=500, content={"detail": "Internal server error", "request_id": request_id})
     response.headers["x-request-id"] = request_id
     return response
+
+
+# Keep CORS outside the error middleware so even an unexpected failure is
+# readable by the frontend, rather than being reported as an offline backend.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # NOTE: upload_dir is deliberately NOT mounted as a static route. Attachments
@@ -79,6 +82,9 @@ app.include_router(versioning.router, prefix="/api/versioning", tags=["versionin
 app.include_router(evals.router, prefix="/api/evals", tags=["evals"])
 app.include_router(inventory.router, prefix="/api/inventory", tags=["inventory"])
 app.include_router(literature.router, prefix="/api/literature", tags=["literature"])
+app.include_router(settings_api.router, prefix="/api/settings", tags=["settings"])
+app.include_router(design.router, prefix="/api/cases", tags=["design"])
+app.include_router(workbench.router, prefix="/api/cases", tags=["workbench"])
 
 
 @app.get("/")

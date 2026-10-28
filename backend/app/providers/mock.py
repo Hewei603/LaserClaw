@@ -12,7 +12,19 @@ DEMO_NOTICE = (
 
 
 class MockProvider(AIProvider):
+    async def agent_turn(self, instructions, messages, tools):
+        import json
+        result = {"status": "needs_input", "summary": "当前是离线演示模式，尚未进行模型推理或仿真。请先在首页配置真实 Agent 模型。",
+                  "questions": [{"question": "请配置可进行工具调用的模型", "why": "通用任务需要模型选择并迭代调用工具。",
+                                 "how_to_obtain": "打开首页 Agent 设置，填写供应商、模型和 API Key 并测试连接。", "expected_format": "配置完成后重新发送任务"}]}
+        return {"items": [], "calls": [{"id": "demo-finish", "name": "finish", "arguments": json.dumps(result, ensure_ascii=False)}],
+                "_usage": {"provider": "mock", "model": "mock", "input_tokens": 0, "output_tokens": 0}}
+
     """Template-based provider that requires no external model call."""
+
+    async def extract_design_facts(self, context: dict, images: list[dict]) -> dict:
+        from ..design.brief import mock_extract
+        return {**mock_extract(context), "model": "mock"}
 
     async def generate_plan(self, case_data: Dict[str, Any]) -> Dict[str, Any]:
         cavity_type = case_data.get("cavity_type", "linear")

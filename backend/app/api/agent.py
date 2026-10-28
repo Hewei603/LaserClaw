@@ -260,7 +260,11 @@ async def chat(
     )
 
     if routed_mode == "chat":
-        content = await get_ai_provider().generate_chat_response(context)
+        try:
+            content = await get_ai_provider().generate_chat_response(context)
+        except RuntimeError as exc:
+            db.rollback()
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         assistant_text = content.get("message") or "我已查看当前案例上下文与知识库,可继续提问或指定要生成的内容。"
         db.add(
             AgentChatMessage(

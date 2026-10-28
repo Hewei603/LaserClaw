@@ -42,6 +42,33 @@ logger = logging.getLogger(__name__)
 class OpenAIProvider(AIProvider):
     """AI provider backed by the OpenAI Chat Completions API."""
 
+    async def agent_turn(self, instructions, messages, tools):
+        from .tool_calling import compatible_turn, openai_turn
+        if get_settings().ai_provider in {"deepseek", "qwen", "zhipu", "moonshot"}:
+            return await compatible_turn(self, instructions, messages, tools)
+        return await openai_turn(self, instructions, messages, tools)
+
+    async def extract_design_facts(self, context: dict, images: list[dict]) -> dict:
+        from ..design.brief import extraction_prompt
+
+        content = [{"type": "text", "text": json.dumps(context, ensure_ascii=False)}]
+        for item in images:
+            content.append({"type": "text", "text": f"Evidence source: image:{item['id']}"})
+            data = base64.b64encode(item["data"]).decode("ascii")
+            content.append({"type": "image_url", "image_url": {"url": f"data:{item['mime']};base64,{data}"}})
+        response = await asyncio.to_thread(
+            self.client.chat.completions.create,
+            model=self.model,
+            messages=[{"role": "system", "content": extraction_prompt()}, {"role": "user", "content": content}],
+            response_format={"type": "json_object"}, max_completion_tokens=8000, timeout=120,
+        )
+        if response.choices[0].finish_reason == "length":
+            raise RuntimeError("模型需求提取被截断，请拆分说明或减少图片后重试。")
+        parsed = self._parse_json_response(response.choices[0].message.content, "design facts")
+        parsed["model"] = self.model
+        usage = response.usage.model_dump() if response.usage else {}
+        return attach_usage_payload(parsed, provider="openai", model=self.model, usage=usage)
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -253,7 +280,7 @@ Return JSON with this shape:
                 # would point the user at the wrong cause. Say what it is.
                 logger.error("OpenAI auth/permission failure for task=%s: %s", task_name, exc)
                 raise RuntimeError(
-                    f"API key 无效或无权限:请检查 .env 中的 API key 是否正确、账户是否有余额。"
+                    f"API key 无效或无权限:请检查首页 Agent 配置（或 .env）中的 API key、账户额度。"
                     f"(原始错误:{type(exc).__name__})"
                 ) from exc
 
@@ -277,7 +304,7 @@ Return JSON with this shape:
 
         raise RuntimeError(
             f"模型服务暂时不可用(已重试 {max_attempts} 次):{type(last_error).__name__}。"
-            f"请稍后重试;若持续失败,请检查网络与 .env 配置。"
+            f"请稍后重试;若持续失败,请检查网络与首页 Agent 配置（或 .env）。"
         )
 
     @staticmethod

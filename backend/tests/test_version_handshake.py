@@ -9,6 +9,7 @@ banner forever; both silently break the one mechanism a non-technical user has
 for noticing that their double-clicked launcher is serving old code.
 """
 import re
+import json
 from pathlib import Path
 
 from app.main import app
@@ -36,3 +37,6 @@ def test_frontend_expected_version_matches_backend():
         f"frontend expects backend {match.group(1)!r} but backend is {APP_VERSION!r}; "
         "update both files together"
     )
+    package = json.loads((REPO_ROOT / 'frontend/package.json').read_text(encoding='utf-8'))
+    lock = json.loads((REPO_ROOT / 'frontend/package-lock.json').read_text(encoding='utf-8'))
+    assert package['version'] == lock['version'] == lock['packages']['']['version'] == APP_VERSION

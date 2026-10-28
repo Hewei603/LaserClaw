@@ -70,10 +70,17 @@ class Settings(BaseSettings):
     max_upload_size: int = 52428800  # 50MB
 
     # AI provider settings
-    ai_provider: str = "mock"  # mock, openai, anthropic, deepseek, qwen, zhipu, moonshot
+    ai_provider: str = "mock"  # mock, codex_exec, or an API provider
+    # Defaults to the persistent upload volume; can be overridden for tests.
+    agent_settings_file: Optional[str] = None
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
     openai_base_url: Optional[str] = None
+    # Codex CLI owns ChatGPT sign-in; LaserClaw never reads its tokens.
+    codex_exec_model: str = "gpt-6.1-sol"
+    codex_exec_path: str = ""
+    codex_exec_timeout_seconds: int = 300
+    codex_exec_reasoning_effort: str = "medium"
     # Mainland-China OpenAI-compatible providers (reuse the OpenAI client with
     # each vendor's endpoint; set the matching *_API_KEY to enable).
     deepseek_api_key: Optional[str] = None
@@ -164,4 +171,7 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     """Return cached application settings."""
-    return Settings()
+    from .agent_settings import read_overrides
+
+    settings = Settings()
+    return settings.model_copy(update=read_overrides(settings))

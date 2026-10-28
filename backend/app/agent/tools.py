@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy.orm import Session
 
@@ -57,7 +57,56 @@ def record_tool_call(
         call.latency_ms = int((perf_counter() - started) * 1000)
 
 
+async def record_async_tool_call(
+    db: Session,
+    task: AgentTask,
+    step_id: int | None,
+    tool_name: str,
+    input_json: dict[str, Any],
+    runner: Callable[[], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Await slow tools while keeping all Session/ORM work on this thread."""
+    started = perf_counter()
+    call = AgentToolCall(task_id=task.id, step_id=step_id, tool_name=tool_name, input_json=input_json)
+    db.add(call)
+    try:
+        output = await runner()
+        call.output_json = output
+        call.status = "completed"
+        return output
+    except Exception as exc:
+        call.status = "failed"
+        call.error_message = str(exc)
+        raise
+    finally:
+        call.latency_ms = int((perf_counter() - started) * 1000)
+
+
 def get_case_payload(case: ExperimentCase) -> dict[str, Any]:
+    design_revisions = [item for item in case.generated_contents if item.content.get("engineering_design")]
+    design_row = max(design_revisions, key=lambda item: item.id) if design_revisions else None
+    latest_design = design_row.content["engineering_design"] if design_row else None
+    projects = [item for item in case.generated_contents
+                if item.content_type == "optical_project" and item.content.get("project")]
+    project_row = max(projects, key=lambda item: item.id) if projects else None
+    current_project = None
+    if project_row:
+        saved = project_row.content
+        # Dense plot arrays belong in the viewer; a report needs the exact model,
+        # boundaries, matrices and analytic results without thousands of samples.
+        analysis = saved.get("analysis") or {}
+        current_project = {
+            "revision_id": project_row.id, "project": saved["project"],
+            "change_note": saved.get("change_note"),
+            "analysis": {key: value for key, value in analysis.items() if key not in {"system", "planes"}},
+        }
+        current_project["analysis"]["planes"] = {
+            name: {key: value for key, value in plane.items() if key != "samples"}
+            for name, plane in analysis.get("planes", {}).items()
+        }
+    superseded = bool(project_row and (not design_row or project_row.id > design_row.id))
+    workbench = [item for item in case.generated_contents if item.content.get("workbench")]
+    latest_workbench = max(workbench, key=lambda item: item.id) if workbench else None
     return {
         "id": case.id,
         "title": case.title,
@@ -66,6 +115,41 @@ def get_case_payload(case: ExperimentCase) -> dict[str, Any]:
         "goal": case.goal,
         "parameters": case.parameters or {},
         "symptoms": case.symptoms or [],
+        "measurements": case.measurements or {},
+        "safety_notes": case.safety_notes,
+        "conclusions": case.conclusions,
+        "engineering_design": None if superseded else latest_design,
+        "optical_project": current_project,
+        "geometry_source": "optical_project" if superseded else "engineering_design" if latest_design else "case_parameters",
+        "historical_design_revision_id": design_row.id if superseded and design_row else None,
+        "latest_workbench_result": ({"content_id": latest_workbench.id, **latest_workbench.content["workbench"]}
+                                    if latest_workbench else None),
+        "design_instructions": (
+            "Use geometry_source to select the current geometry. A newer optical_project supersedes old geometry "
+            "in case parameters, labels and prior generated designs; retain unrelated user facts. Read its exact "
+            "system, assumptions and analysis. The latest workbench result supplies the outcome and unresolved "
+            "questions, not measured performance. Geometry and assumptions are proposals, not measurements. "
+            "Do not infer missing pump positions, output power, or optimal output coupling."
+        ),
+        "module_results": [
+            {"module_id": module.id, "module_type": module.module_type,
+             "title": module.title, "result": module.result_json}
+            for module in case.case_modules
+            if module.status == "completed" and module.result_json
+        ],
+    }
+
+
+def saved_project_physics(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Keep all generation entry points on the same current optical revision."""
+    project = payload.get("optical_project")
+    if payload.get("geometry_source") != "optical_project" or not project:
+        return None
+    return {
+        "available": True, "source": "optical_project", "project_revision_id": project["revision_id"],
+        "tools_run": ["saved_optical_project_analysis"],
+        "results": {"optical_system": {"system": project["project"]["system"], **project["analysis"]}},
+        "note": "Exact saved project analysis, under its declared assumptions; not measured output power. Older case geometry is superseded.",
     }
 
 
