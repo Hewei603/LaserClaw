@@ -56,6 +56,8 @@ The **光学工程** tab is usable without a model request: expand element param
 
 ## Validation
 
+Rezonator oracle tests read `calc/rezonator.py` from `REZONATOR_REFERENCE_DIR`, defaulting to the ignored `rezonator2-master/` checkout. Without that optional checkout, only those cross-checks skip locally; analytic kernel tests still run. CI checks out upstream commit `aa7e52725da5826eddd1891aee2e308e9390ba3e` and sets `REQUIRE_REZONATOR_REFERENCE=1`, so missing reference files fail CI rather than silently skipping validation. The upstream source is used as a test oracle and is not bundled into LaserClaw.
+
 `backend/tests/test_optical_upgrade.py` adds analytic reversed-mirror references, asymmetric thick-lens forward/return checks, quarter-pitch GRIN, M² propagation, caustic fitting, 2D g-parameter maps, project locks/history/stale writes, and saved-scan reload/isolation. These deterministic checks do not replace a real configured-model acceptance run.
 
 `backend/tests/test_workbench.py` exercises analytic Gaussian references, dielectric physical coordinates, a 4f relay, astigmatic ring/unstable cases, scans, input validation, iterative error repair, numerical evidence persistence, follow-up context, data fitting, file reads, unsupported results, cancellation, provider failure and Responses protocol continuation.

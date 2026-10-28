@@ -1,6 +1,8 @@
 """Test configuration."""
 import os
 import tempfile
+import importlib.util
+from pathlib import Path
 
 # Ignore any developer .env so the suite never picks up real API keys
 # or a different provider. Must be set before app.config is imported.
@@ -28,6 +30,21 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture(scope='session')
+def rezonator_reference():
+    """Optional external oracle locally; CI explicitly requires its pinned checkout."""
+    root = Path(os.environ.get('REZONATOR_REFERENCE_DIR', Path(__file__).resolve().parents[2] / 'rezonator2-master'))
+    path = root / 'calc/rezonator.py'
+    if not path.is_file():
+        if os.environ.get('REQUIRE_REZONATOR_REFERENCE') == '1':
+            pytest.fail('Pinned Rezonator reference is required but missing: ' + str(path))
+        pytest.skip('External Rezonator reference unavailable; set REZONATOR_REFERENCE_DIR to its checkout.')
+    spec = importlib.util.spec_from_file_location('rezonator_reference', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture(autouse=True)

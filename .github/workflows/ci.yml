@@ -16,6 +16,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check out pinned optical reference
+        uses: actions/checkout@v4
+        with:
+          repository: orion-project/rezonator2
+          ref: aa7e52725da5826eddd1891aee2e308e9390ba3e
+          path: rezonator2-master
+          sparse-checkout: |
+            calc
+            LICENSE
+          sparse-checkout-cone-mode: false
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -38,6 +49,7 @@ jobs:
           RETRIEVAL_BACKEND: sql_json
           RERANKER_PROVIDER: none
           PYTEST_ADDOPTS: ""
+          REQUIRE_REZONATOR_REFERENCE: "1"
         run: |
           set +e
           python -m pytest tests -q > pytest-output.txt 2>&1

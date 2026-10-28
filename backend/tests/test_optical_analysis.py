@@ -1,9 +1,7 @@
 """Numerical and API regressions for the interactive, read-only analysis bench."""
 import json
 import math
-import importlib.util
 from copy import deepcopy
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -169,16 +167,13 @@ def test_cold_scan_boundary_matches_closed_form(optical_design):
 
 
 @pytest.mark.parametrize("heat", [None, 100, 500])
-def test_piecewise_probe_matches_rezonator_reference(optical_design, heat):
+def test_piecewise_probe_matches_rezonator_reference(optical_design, heat, rezonator_reference):
     """Independent element products; compare at each physical reference plane.
 
     Beam width uses the bundled upstream Python helper. Curvature uses the
     closed form in Rezonator src/math/AbcdCalculator.cpp (not a C++ execution).
     """
-    path = Path(__file__).resolve().parents[2] / 'rezonator2-master/calc/rezonator.py'
-    spec = importlib.util.spec_from_file_location('rezonator_analysis_reference', path)
-    reference = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(reference)
+    reference = rezonator_reference
     c = optical_design["candidates"][0]
     n = c["crystal"]["n"]
     def space(d):

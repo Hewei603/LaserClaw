@@ -331,15 +331,10 @@ def test_nominal_fiber_image_does_not_become_measured_mode_target():
     assert result['power_prediction']['output_w'] is None
 
 
-def test_rezonator_export_matches_bundled_reference_calculation(design):
-    import importlib.util
-    from pathlib import Path
+def test_rezonator_export_matches_bundled_reference_calculation(design, rezonator_reference):
     import numpy as np
     from app.design.rezonator import cold_cavity_schema
-    path = Path(__file__).resolve().parents[2] / 'rezonator2-master' / 'calc' / 'rezonator.py'
-    spec = importlib.util.spec_from_file_location('rezonator_reference', path)
-    reference = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(reference)
+    reference = rezonator_reference
     for c in design['candidates']:
         exported = cold_cavity_schema(c, 1064)
         assert exported['trip_type'] == 'SW'

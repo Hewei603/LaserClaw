@@ -147,15 +147,20 @@ class Settings(BaseSettings):
 
     @field_validator("database_url")
     @classmethod
-    def _pin_sqlite_to_backend(cls, value: str) -> str:
-        """A relative sqlite path must not depend on the CWD.
+    def _normalize_database_url(cls, value: str) -> str:
+        """Pin relative SQLite paths and use the installed PostgreSQL driver.
 
         `sqlite:///./laserclaw.db` resolves to a DIFFERENT database depending on
         where uvicorn/alembic was started — the historical data lives in
         backend/laserclaw.db (launcher and alembic both run from backend/), so
         every start location is normalized to that file. Absolute paths,
-        :memory: and non-sqlite URLs pass through untouched.
+        :memory: and explicit driver URLs pass through untouched. Bare PostgreSQL
+        URLs use psycopg2, which requirements.txt installs; SQLAlchemy's default
+        driver can change independently of that dependency.
         """
+        for scheme in ('postgresql://', 'postgres://'):
+            if value.startswith(scheme):
+                return 'postgresql+psycopg2://' + value[len(scheme):]
         prefix = "sqlite:///"
         if not value.startswith(prefix) or _IN_CONTAINER:
             return value

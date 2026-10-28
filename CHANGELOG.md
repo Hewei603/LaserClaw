@@ -9,6 +9,7 @@ The release consolidates the task-led Agent, editable optical engineering, Codex
 - Current optical projects now take precedence over obsolete specialized designs in plans/reports and the case overview, while historical records remain available. Agent completion refreshes case artifacts without discarding an in-progress conversation.
 
 - Published the real-case acceptance report, optical figures, editable model and raw numerical evidence under docs/releases/2.0.0. Maximum-power optimization remains explicitly incomplete because the current ABCD tool lacks the required gain/power solver and measured constraints.
+- Fixed clean-environment release checks: CI fetches a pinned upstream Rezonator calculation oracle without bundling it in the product; local cross-checks explicitly skip when the optional checkout is absent. Bare PostgreSQL URLs now select the installed psycopg2 driver consistently in the app and Alembic.
 
 ## Development milestones included in 2.0
 
